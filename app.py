@@ -482,6 +482,44 @@ def ensure_triggers():
           END;
         END;""")
 
+                # Mese valido 1..12
+        conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS sp_mese_range_ins
+        BEFORE INSERT ON stipendi_personale
+        BEGIN
+          SELECT CASE
+            WHEN NEW.mese < 1 OR NEW.mese > 12 THEN RAISE(ABORT,'mese invalido')
+          END;
+        END;""")
+
+        conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS sp_mese_range_upd
+        BEFORE UPDATE OF mese ON stipendi_personale
+        BEGIN
+          SELECT CASE
+            WHEN NEW.mese < 1 OR NEW.mese > 12 THEN RAISE(ABORT,'mese invalido')
+          END;
+        END;""")
+
+        # Importi non negativi
+        conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS sp_importi_nonneg_ins
+        BEFORE INSERT ON stipendi_personale
+        BEGIN
+          SELECT CASE WHEN NEW.lordo < 0 OR NEW.netto < 0 OR NEW.contributi < 0
+            THEN RAISE(ABORT,'importo negativo')
+          END;
+        END;""")
+
+        conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS sp_importi_nonneg_upd
+        BEFORE UPDATE OF lordo,netto,contributi ON stipendi_personale
+        BEGIN
+          SELECT CASE WHEN NEW.lordo < 0 OR NEW.netto < 0 OR NEW.contributi < 0
+            THEN RAISE(ABORT,'importo negativo')
+          END;
+        END;""")
+
         conn.commit()
 
     print("[DB] triggers FK + stato_pagamento NOT NULL/valid OK", flush=True)

@@ -78,7 +78,7 @@ Tabelle principali: `utenti`, `licenze`, `clienti`, `incassi`, `spese_fisse`, `f
 - `/fornitori`  
 - `/fatture` *(QR SEPA testato; blocco doppio pagamento)*  
 - `/annuale.html`  
-- `/personale.html` *(CRUD completo, campi Assunzione/Rapporto/Fine)*
+- `/personale.html` *(CRUD completo, campi Assunzione/Rapporto/Fine)* — **CHIUSA DEFINITIVAMENTE (no ulteriori modifiche)**
 
 **⚠️ WIP:** `percentuali.html`
 
@@ -92,17 +92,17 @@ Tabelle principali: `utenti`, `licenze`, `clienti`, `incassi`, `spese_fisse`, `f
 
 ## 💸 Stipendi
 ### Stato attuale (`stipendi.html`)
-- **UI OK**: full-width responsivo; popup QR centrato e chiudibile (lock scroll); pulsante **Pagato** verde acceso persistente; importi verdi e **readonly** dopo conferma; placeholder **“Lordo / Contributi / Netto”** al posto di `0.00`.
-- **Persistenza attuale: SOLO LocalStorage. _NON_ salva in DB.**  
-  In modalità **incognito** i dati stipendi possono non comparire (comportamento atteso del browser perché la fonte attuale è LS).
+- **UI OK**: full-width responsivo; popup QR centrato e chiudibile (lock scroll); pulsante **Pagato** verde acceso persistente; importi verdi e **readonly** dopo conferma; placeholder **“Lordo / Contributi / Netto”** al posto di `0.00`.  
+- Conferma eliminazione **a doppio step** (due modali).  
+- **Persistenza attuale:** dati su **LocalStorage** lato client; API server pronte per integrazione DB.
 
 ### API Stipendi (tutte filtrate per `_uid()`; mutate con CSRF)
-- `GET  /api/stipendi/dettaglio/<anno>` → **OK** (dettaglio per dipendente/mese — fonte server)
-- `PUT  /api/stipendi/<personale_id>` → **DA FIXARE** (write path non operativo: **normalizzare `mese` a INT `1..12`** prima di INSERT/UPDATE)
-- `GET  /api/stipendi/<anno>/<mese>` → **OK** (aggregato mese per ruolo)
-- `GET  /api/stipendi/<int:anno>` → **OK** (aggregato annuale)
-- `POST /api/stipendi/<personale_id>/qr` → **OK** (QR SEPA)
-- `DELETE /api/stipendi` → **OK** (pulizia dati utente corrente – dev/testing)
+- `GET  /api/stipendi/dettaglio/<anno>` → dettaglio per dipendente/mese (fonte server)  
+- `PUT  /api/stipendi/<personale_id>` → aggiornamento mesi (normalizzare `mese` a INT `1..12`)  
+- `GET  /api/stipendi/<anno>/<mese>` → aggregato mese per ruolo  
+- `GET  /api/stipendi/<int:anno>` → aggregato annuale  
+- `POST /api/stipendi/<personale_id>/qr` → QR SEPA  
+- `DELETE /api/stipendi` → pulizia dati utente corrente (dev/testing)
 
 ### Invarianti (non negoziabili)
 - **Mai** scrivere `mese` come testo nel DB; **sempre INT 1..12**  
@@ -118,39 +118,143 @@ Tabelle principali: `utenti`, `licenze`, `clienti`, `incassi`, `spese_fisse`, `f
 
 ---
 
-## ✅ TODO / Next Steps
-- **PRIORITÀ:** ripristinare **salvataggio in DB** per stipendi
-  - Normalizzare `mese` → **INT `1..12`** lato server
-  - `ON CONFLICT (user_id, personale_id, anno, mese)` → `UPDATE`
-  - Verificare join multi-tenant: `... AND p.user_id = sp.user_id`
-  - Test cross-browser (normale/incognito): **fonte verità = DB**
-- `percentuali.html` (nuova)  
-- Pulizia profilo bancario utente (superfluo con QR)  
-- Decimali: parsing virgola/punto ovunque (coerente lato server)  
-- Collegare stipendi all’annuale (totali per ruolo/mese)  
-- Test end-to-end multi-tenant: fixture con utenti A/B che **non si vedono mai**
+## 🧭 Git & GitHub — Guida pratica
 
----
+### 0) `.gitignore` minimo
+Crea/aggiorna `.gitignore` con:
+venv/
+pycache/
+*.pyc
+*.pyo
+*.pyd
+*.db
+.sqlite
+backup/
+*.zip
+.env
+.flaskenv
+*.log
+.DS_Store
 
-## 🧪 Checklist PR (Sicurezza & Qualità)
-- [ ] Ogni SELECT/UPDATE/DELETE filtra `user_id = _uid()`  
-- [ ] Nessun `user_id` accettato/derivato dal client  
-- [ ] `mese` normalizzato `1..12` **prima** del DB  
-- [ ] Mutazioni: `@require_csrf`, `@require_login`, `@require_license`  
-- [ ] Join multi-tenant: `... AND <tabA>.user_id = <tabB>.user_id`  
-- [ ] Test rapido su browser: normale/incognito (DB fonte verità)  
-- [ ] Migrazioni schema: vincoli/indici preservati
+csharp
+Copia codice
 
----
+> Se alcuni di questi sono già tracciati, vedi “Rimuovere file già tracciati”.
 
-## 🔌 Script utili (DEV)
-**Svuota LocalStorage** (console browser):
-```js
+### 1) Configurazione Git (una volta per PC)
+```powershell
+git config --global user.name  "Il Tuo Nome"
+git config --global user.email "tua-email@esempio.it"
+git config --global core.autocrlf true   # consigliato su Windows
+2) Crea il repo su GitHub (una volta)
+Vai su GitHub → New
+
+Nome: RistoSmartFM_New (o quello che usi)
+
+Lascia NON spuntati: Add a README, Add .gitignore, Choose a license
+
+Create repository
+
+Nella pagina del repo: Code → HTTPS → copia l’URL che finisce con .git (es. https://github.com/tuoutente/RistoSmartFM_New.git)
+
+3) Collega il progetto locale e fai il primo push
+powershell
+Copia codice
+# nella cartella del progetto
+git init
+git add .
+git commit -m "init: progetto pulito (ignora venv/DB/segreti)"
+git branch -M main
+git remote add origin "https://github.com/tuoutente/RistoSmartFM_New.git"
+git push -u origin main
+4) Flusso quotidiano
+powershell
+Copia codice
+git pull --rebase origin main   # aggiornati prima
+git add -A
+git commit -m "descrizione chiara"
+git push
+5) Nuova funzionalità su branch
+powershell
+Copia codice
+git checkout -b feature/nome-funzionalita
+# lavori...
+git add -A
+git commit -m "implementa nome-funzionalita"
+git push -u origin feature/nome-funzionalita
+Poi apri una Pull Request su GitHub verso main.
+
+6) Clonare su un altro PC
+bash
+Copia codice
+git clone https://github.com/tuoutente/RistoSmartFM_New.git
+cd RistoSmartFM_New
+python -m venv venv
+# Windows:
+.\venv\Scripts\activate
+pip install -r requirements.txt
+7) Rimuovere file già tracciati (ora ignorati)
+powershell
+Copia codice
+git rm -r --cached venv backup *.db *.sqlite* *.zip .env .flaskenv
+git commit -m "gitignore: rimuovi artefatti/DB/segreti dal tracking"
+git push
+8) Remote esistente / Cambiare URL
+powershell
+Copia codice
+git remote -v
+git remote set-url origin "https://github.com/tuoutente/RistoSmartFM_New.git"
+9) Errori comuni (fix rapidi)
+Author identity unknown
+Configura nome/email (vedi punto 1).
+
+src refspec main does not match any
+Fai almeno un commit prima del push: git add . && git commit -m "first commit".
+
+origin already exists
+Usa git remote set-url origin "<nuovo-URL>.git".
+
+Avvisi CRLF/LF su Windows
+git config --global core.autocrlf true.
+
+✅ TODO / Next Steps
+PRIORITÀ: integrazione completa salvataggio Stipendi su DB
+
+Normalizzare mese → INT 1..12 lato server
+
+ON CONFLICT (user_id, personale_id, anno, mese) → UPDATE
+
+Verifica join multi-tenant (... AND p.user_id = sp.user_id)
+
+Test incognito: fonte verità = DB
+
+percentuali.html
+
+Decimali server (virgola/punto) coerenti con front-end
+
+Collegare stipendi all’annuale (totali per ruolo/mese)
+
+🧪 Checklist PR (Sicurezza & Qualità)
+ Ogni SELECT/UPDATE/DELETE filtra user_id = _uid()
+
+ Nessun user_id accettato/derivato dal client
+
+ mese normalizzato 1..12 prima del DB
+
+ Mutazioni: @require_csrf, @require_login, @require_license
+
+ Join multi-tenant: ... AND <tabA>.user_id = <tabB>.user_id
+
+ Test rapido su browser (normale/incognito) con DB come fonte verità
+
+ Migrazioni schema: vincoli/indici preservati
+
+🔌 Script utili (DEV)
+Svuota LocalStorage (console browser):
+
+js
+Copia codice
 localStorage.removeItem("STIPENDI_DETTAGLIO");
 localStorage.removeItem("STIPENDI_AGGREGATO");
 localStorage.removeItem("stipendi_update_trigger");
 console.log("✅ LocalStorage stipendi pulito");
-
-curl -X DELETE http://127.0.0.1:5000/api/stipendi \
-  -H "Cookie: session=<tua-sessione>" \
-  -H "X-CSRFToken: <token>"
