@@ -1,0 +1,50 @@
+# Web framework
+flask
+
+# Gestione variabili ambiente (.flaskenv)
+python-dotenv
+
+# Database SQLite + interazioni
+sqlalchemy
+
+# Per formattazione e gestione date
+python-dateutil
+
+# Per eventuali grafici/report
+matplotlib
+pandas
+
+
+
+# 📌 A cosa serve ognuno
+# flask → il cuore del progetto (server web, routing, templates).
+
+# python-dotenv → per leggere automaticamente il file .flaskenv con le impostazioni (es. FLASK_APP=app.py).
+
+# sqlalchemy → utile se vogliamo gestire database SQLite/MySQL/Postgres in modo più “pulito” invece di scrivere query a mano.
+
+# python-dateutil → gestire meglio le date (mesi, calcoli su giorni, ecc).
+
+# matplotlib + pandas → se più avanti vogliamo generare report o grafici (es. incassi annuali).
+
+
+
+# ///per reinstallare automaticamente Flask e dotenv senza doverli riscrivere uno per uno.
+
+# passo pratico : 
+
+#Windows (PowerShell o CMD):
+
+#echo flask > requirements.txt
+#echo python-dotenv >> requirements.txt
+
+# 📌 Come usarlo
+
+# Salva il file requirements.txt nella cartella del progetto.
+
+# Installa tutte le librerie in un colpo con:
+
+# pip install -r requirements.txt
+
+
+# Ogni volta che aggiungeremo una nuova libreria, la inseriamo anche qui.

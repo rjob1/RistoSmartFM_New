@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+{% block title %}RistoSmart FM / Newsletter{% endblock %}
+
+{% block content %}
+{% include "_navbar.html" %}
+
+<div class="container py-3">
+  <h2 class="mb-3" style="color:#003366;">📰 Newsletter</h2>
+
+  <div class="alert alert-info small">
+    I destinatari vengono dalla selezione fatta in <a href="{{ url_for('lista_clienti') }}">Clienti</a>.
+    Puoi tornare indietro per modificare la selezione.
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+        <!-- Scelta canale -->
+        <div class="btn-group" role="group" aria-label="canale">
+          <input type="radio" class="btn-check" name="channel" id="chEmail" autocomplete="off" checked>
+          <label class="btn btn-outline-primary btn-sm" for="chEmail">Email</label>
+          <input type="radio" class="btn-check" name="channel" id="chWhats" autocomplete="off">
+          <label class="btn btn-outline-success btn-sm" for="chWhats">WhatsApp</label>
+          <input type="radio" class="btn-check" name="channel" id="chBoth" autocomplete="off">
+          <label class="btn btn-outline-secondary btn-sm" for="chBoth">Entrambi</label>
+        </div>
+
+        <a href="{{ url_for('lista_clienti') }}" class="btn btn-light btn-sm ms-auto">↩️ Torna a Clienti</a>
+        <a href="/logs/email.csv" class="btn btn-outline-secondary btn-sm">⬇️ Log Email</a>
+        <a href="/logs/whatsapp.csv" class="btn btn-outline-success btn-sm">⬇️ Log WhatsApp</a>
+      </div>
+
+      <div class="row g-3">
+        <!-- Form newsletter -->
+        <div class="col-12 col-lg-7">
+          <div class="mb-2">
+            <label class="form-label small">Oggetto (solo Email)</label>
+            <input id="subject" class="form-control form-control-sm" placeholder="Novità del mese per {{'{{nome}}'}}">
+          </div>
+          <div class="mb-2">
+            <label class="form-label small">Contenuto</label>
+            <textarea id="body" class="form-control" rows="8" placeholder="Usa variabili: {{'{{nome}}'}}, {{'{{note}}'}}, {{'{{cta_url}}'}}"></textarea>
+          </div>
+          <button id="btnNext" class="btn btn-primary btn-sm">Prossimo step (invio) →</button>
+        </div>
+
+        <!-- Destinatari -->
+        <div class="col-12 col-lg-5">
+          <div class="border rounded p-2">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <strong>Destinatari selezionati</strong>
+              <span id="count" class="badge text-bg-secondary">0</span>
+            </div>
+            <div id="recipients" class="small" style="max-height:280px; overflow:auto"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- === Modal Anteprima === -->
+<div class="modal fade" id="previewModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Anteprima Newsletter</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Chiudi"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <span class="badge bg-secondary" id="badge-count">0 destinatari</span>
+          <span class="badge bg-info text-dark ms-2" id="badge-canale">—</span>
+        </div>
+
+        <div id="box-oggetto" class="mb-2" style="display:none;">
+          <strong>Oggetto:</strong> <span id="prev-oggetto"></span>
+        </div>
+
+        <div class="mb-3">
+          <strong>Messaggio:</strong>
+          <pre id="prev-testo" class="border rounded p-2 mb-0" style="white-space:pre-wrap;"></pre>
+        </div>
+
+        <div>
+          <strong>Destinatari:</strong>
+          <ul id="prev-lista" class="mt-2 mb-0"></ul>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-success" id="btn-conferma">Conferma & Invia</button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Chiudi</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Usa la stessa chiave usata in clienti.html
+const UID = window.USER_ID || "anon";
+const SEL_KEY = `${UID}_newsletter_selection`;
+
+// Utility per CSRF
+function getCSRF(){
+  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? null;
+}
+
+// Carica e mostra lista destinatari nella pagina
+(async () => {
+  const ids = JSON.parse(localStorage.getItem(SEL_KEY) || "[]").map(String);
+  const box = document.getElementById("recipients");
+  const count = document.getElementById("count");
+  if (!ids.length) {
+    box.innerHTML = '<div class="text-muted">Nessun cliente selezionato. Torna a <a href="{{ url_for("lista_clienti") }}">Clienti</a>.</div>';
+    count.textContent = "0";
+    return;
+  }
+  try {
+    const r = await fetch("/api/clienti", {credentials:"same-origin"});
+    const all = await r.json();
+    const map = new Map(all.map(c => [String(c.id), c]));
+    const sel = ids.map(id => map.get(id)).filter(Boolean);
+
+    count.textContent = sel.length;
+    box.innerHTML = sel.map(c => `
+      <div class="d-flex justify-content-between align-items-center py-1 border-bottom">
+        <div>
+          <div><strong>${escapeHtml(c.nome||"")}</strong></div>
+          <div class="text-muted small">${escapeHtml(c.email||"-")} · ${escapeHtml(c.telefono||"-")}</div>
+        </div>
+        <span class="badge ${c.email?'text-bg-primary':'text-bg-light'}">Email</span>
+        <span class="badge ${c.telefono?'text-bg-success':'text-bg-light'}">WA</span>
+      </div>`).join("");
+  } catch {
+    box.innerHTML = '<div class="text-danger">Errore nel caricare i clienti.</div>';
+    count.textContent = "0";
+  }
+  function escapeHtml(s){ 
+    return String(s).replace(/[&<>"']/g, m => (
+      {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]
+    )); 
+  }
+})();
+
+// Gestione anteprima + invio
+(function(){
+  async function getSelezionati(){
+    const ids = JSON.parse(localStorage.getItem(SEL_KEY) || "[]").map(String);
+    if (!ids.length) return [];
+    try {
+      const r = await fetch("/api/clienti", {credentials:"same-origin"});
+      const all = await r.json();
+      const map = new Map(all.map(c => [String(c.id), c]));
+      return ids.map(id => map.get(id)).filter(Boolean);
+    } catch { 
+      return []; 
+    }
+  }
+
+  function canaleSelezionato(){
+    if (document.getElementById("chBoth")?.checked)  return "entrambi";
+    if (document.getElementById("chWhats")?.checked) return "whatsapp";
+    return "email";
+  }  
+
+  async function mostraAnteprima(){
+  const selezionati = await getSelezionati();
+  const canale  = canaleSelezionato();
+  const oggetto = (document.getElementById("subject")?.value || "").trim();
+  const testo   = (document.getElementById("body")?.value    || "").trim();
+
+  if (!selezionati.length){ alert("Seleziona almeno un cliente."); return; }
+  if ((canale==="email"||canale==="entrambi") && !oggetto){ alert("Oggetto obbligatorio."); return; }
+  if (!testo){ alert("Inserisci il testo."); return; }
+
+  document.getElementById("badge-count").textContent = `${selezionati.length} destinatari`;
+  document.getElementById("badge-canale").textContent =
+    canale==="entrambi" ? "Email + WhatsApp" : (canale==="email" ? "Solo Email" : "Solo WhatsApp");
+
+  const boxOggetto = document.getElementById("box-oggetto");
+  boxOggetto.style.display = (canale==="email"||canale==="entrambi") ? "" : "none";
+
+  // --- token Jinja-safe + render ---
+  const TOK_NOME  = "{{'{{nome}}'}}";
+  const TOK_NOTE  = "{{'{{note}}'}}";
+  const TOK_EMAIL = "{{'{{email}}'}}";
+  const prefisso  = "Ciao " + TOK_NOME + ", ";
+  const sample    = selezionati[0] || {};
+  const render = (s, c) => (s || "")
+    .split(TOK_NOME).join(c?.nome  || "")
+    .split(TOK_NOTE).join(c?.note  || "")
+    .split(TOK_EMAIL).join(c?.email|| "");
+
+  // anteprima testo + oggetto
+  document.getElementById("prev-testo").textContent = render(prefisso + testo, sample);
+  if (canale==="email"||canale==="entrambi"){
+    document.getElementById("prev-oggetto").textContent = render(oggetto, sample);
+  } else {
+    document.getElementById("prev-oggetto").textContent = "";
+  }
+
+  const ul = document.getElementById("prev-lista");
+  ul.innerHTML = "";
+  selezionati.forEach(c=>{
+    const extra = [];
+    if ((canale==="email"||canale==="entrambi") && c.email) extra.push(c.email);
+    if (canale!=="email" && c.telefono) extra.push(c.telefono);
+    const li = document.createElement("li");
+    li.textContent = `${c.nome||"—"}${extra.length ? " — "+extra.join(" | ") : ""}`;
+    ul.appendChild(li);
+  });
+
+  new bootstrap.Modal(document.getElementById("previewModal")).show();
+}
+
+  async function invia(){
+    const selezionati = await getSelezionati();
+    const channel = canaleSelezionato();
+    const subject = (document.getElementById("subject")?.value || "").trim();
+    const body    = (document.getElementById("body")?.value    || "").trim();
+
+    const btn = document.getElementById("btn-conferma");
+    btn.disabled = true; btn.textContent = "Invio in corso…";
+
+    try{
+      const res = await fetch("/api/newsletter/send", {
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "X-CSRF-Token": getCSRF()
+        },
+        credentials:"same-origin",
+        body: JSON.stringify({
+          channel,
+          subject,
+          body,
+          recipients: selezionati.map(c => c.id)   // solo gli ID
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.msg || "Errore invio");
+
+      const okEmail = (data.email_results||[]).filter(x=>x.ok).length;
+      const koEmail = (data.email_results||[]).filter(x=>!x.ok).length;
+
+      if (channel==="whatsapp"||channel==="entrambi"){
+        const links = data.wa_links || [];
+        links.forEach((l, i) => {
+          if (l.url) setTimeout(() => window.open(l.url, "_blank"), i * 150);
+        });
+      }
+
+      alert(`Invio completato.\nEmail OK: ${okEmail}${koEmail? " | Email fallite: "+koEmail : ""}`);
+      bootstrap.Modal.getInstance(document.getElementById("previewModal"))?.hide();
+    }catch(err){
+      alert("Errore: "+err.message);
+    }finally{
+      btn.disabled = false; btn.textContent = "Conferma & Invia";
+    }
+  }
+
+  document.getElementById("btnNext")?.addEventListener("click", e=>{
+    e.preventDefault(); mostraAnteprima();
+  });
+  document.getElementById("btn-conferma")?.addEventListener("click", e=>{
+    e.preventDefault(); invia();
+  });
+})();  // chiusura IIFE
+</script>
+
+
+{% endblock %}

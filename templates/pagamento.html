@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Paga Fattura #{{ fattura.id }}{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+  <div class="card shadow-sm border-0">
+    <div class="card-header bg-primary text-white">
+      <h4 class="mb-0">💳 Pagamento Fattura</h4>
+    </div>
+    <div class="card-body">
+      <h5>Fattura #{{ fattura.id }}</h5>
+      <dl class="row">
+        <dt class="col-sm-3">Fornitore:</dt>
+        <dd class="col-sm-9">{{ fattura.fornitore }}</dd>
+
+        <dt class="col-sm-3">Categoria:</dt>
+        <dd class="col-sm-9">{{ fattura.categoria }}</dd>
+
+        <dt class="col-sm-3">Data inserimento:</dt>
+        <dd class="col-sm-9">{{ fattura.data_inserimento }}</dd>
+
+        <dt class="col-sm-3">Scadenza:</dt>
+        <dd class="col-sm-9">{{ fattura.data_scadenza }}</dd>
+
+        <dt class="col-sm-3">Importo:</dt>
+        <dd class="col-sm-9 fs-4 fw-bold text-success">€ {{ "%.2f"|format(fattura.importo) }}</dd>
+
+        <dt class="col-sm-3">Stato:</dt>
+        <dd class="col-sm-9">
+          <span class="badge 
+            {% if fattura.stato == 'Pagato' %}bg-success
+            {% elif fattura.stato == 'Non pagato' %}bg-danger
+            {% else %}bg-warning text-dark{% endif %}">
+            {{ fattura.stato }}
+          </span>
+        </dd>
+
+        <dt class="col-sm-3">Numero:</dt>
+        <dd class="col-sm-9">{{ fattura.numero or "-" }}</dd>
+      </dl>
+
+      <hr>
+
+      {% if fattura.stato != 'Pagato' %}
+      <form action="/api/paga_fattura/{{ fattura.id }}" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="btn btn-success btn-lg w-100">
+          ✅ Conferma Pagamento
+        </button>
+      </form>
+      {% else %}
+      <div class="alert alert-success text-center">
+        <strong>🟢 Pagamento già effettuato</strong>
+      </div>
+      {% endif %}
+
+      <div class="mt-3 text-center">
+        <a href="/fatture" class="btn btn-outline-secondary">← Torna alle fatture</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

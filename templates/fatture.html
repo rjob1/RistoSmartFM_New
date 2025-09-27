@@ -1,0 +1,891 @@
+﻿{% extends "base.html" %}
+{% block title %}Gestione Fatture{% endblock %}
+
+{% block content %}
+
+<div class="container-fluid mt-4 px-4">
+  <h2 class="mb-3">Gestione Fatture</h2>
+
+  <!-- ðŸ”” Notifiche -->
+  <div id="notifiche" class="alert alert-info d-none mb-3"></div>
+
+  <!-- Solo admin: test voce -->
+  <button id="testVoce" class="btn btn-warning btn-sm d-none">Test voce</button>
+
+  <!-- Riga inserimento scorrevole -->
+  <div class="table-responsive mb-3">
+    <table class="table table-striped table-hover">
+      <thead class="table-light">
+        <tr>
+          <th style="min-width: 120px;">Data</th>
+          <th style="min-width: 180px;">Fornitore</th>
+          <th style="min-width: 180px;">Categoria</th>
+          <th style="min-width: 120px;">Scadenza</th>
+          <th style="min-width: 100px;">Importo</th>
+          <th style="min-width: 150px;">Stato</th>
+          <th style="min-width: 120px;">Numero</th>          
+          <th style="width: 220px;">Azioni</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="riga-inserimento">
+          <td><input type="date" id="dataInserimento" class="form-control form-control-sm"></td>
+          <td><select id="fornitore" class="form-select form-select-sm"></select></td>
+          <td><select id="categoria" class="form-select form-select-sm"></select></td>
+          <td><input type="date" id="dataScadenza" class="form-control form-control-sm"></td>
+          <td><input type="number" id="importo" class="form-control form-control-sm" step="0.01"></td>
+          <td>
+            <select id="stato" class="form-select form-select-sm">
+              <option value="Pagato">Pagato</option>
+              <option value="Non pagato" selected>Non pagato</option>
+              <option value="Stand by">Stand by</option>
+            </select>
+          </td>
+          <td><input type="text" id="numero" class="form-control form-control-sm"></td>
+          <td class="text-end">
+            <button id="btnAggiungi" class="btn btn-primary btn-sm">Aggiungi</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ðŸ”½ FILTRO STATO + ESPORTA CSV -->
+  <div class="row g-3 mb-3 align-items-end">
+    <div class="col-lg-2 col-md-4">
+      <label class="form-label">Filtra per stato</label>
+      <select id="filtroStato" class="form-select form-select-sm">
+        <option value="">Tutti</option>
+        <option value="Pagato">Pagato</option>
+        <option value="Non pagato">Non pagato</option>
+        <option value="Stand by">Stand by</option>
+      </select>
+    </div>
+    <div class="col-lg-auto col-md-4">
+      <button id="btnEsportaCSV" class="btn btn-outline-secondary w-100 btn-sm">
+        <i class="bi bi-download me-1"></i> Esporta CSV
+      </button>
+    </div>
+    <div class="col-lg-auto col-md-4">
+      <button id="btnDettaglioFornitori" class="btn btn-primary w-100 btn-sm">
+        <i class="bi bi-card-list me-1"></i> Vai al dettaglio spese per fornitore
+      </button>
+    </div>
+  </div>
+
+  <!-- Tabella fatture -->
+  <div class="table-responsive">
+    <table class="table table-striped table-hover" id="tabellaFatture">
+      <thead class="table-light">
+        <tr>
+          <th style="min-width: 120px;">Data</th>
+          <th style="min-width: 180px;">Fornitore</th>
+          <th style="min-width: 180px;">Categoria</th>
+          <th style="min-width: 120px;">Scadenza</th>
+          <th style="min-width: 100px;">Importo</th>
+          <th style="min-width: 150px;">Stato</th>
+          <th style="min-width: 120px;">Numero</th>
+          <th style="width: 150px;">Azioni</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:11">
+  <div id="toast" class="toast align-items-center text-white bg-success border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body" id="toastMsg">Salvato!</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+<style>
+@keyframes blink-10s {
+    0%, 90% { opacity: 1; }
+    91%, 100% { opacity: 0.6; }
+}
+
+/* ðŸ“Œ Riga inserimento coerente con la tabella */
+.riga-inserimento .form-control,
+.riga-inserimento .form-select {
+  font-size: 0.875rem;
+  padding: 0.25rem 0.5rem;
+  height: calc(1.5em + 0.75rem + 2px);
+}
+
+.riga-inserimento label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  margin-bottom: 0.2rem;
+  color: #333;
+}
+
+.riga-inserimento button {
+  height: 100%;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.container-fluid {
+  max-width: 1920px;
+  margin: 0 auto;
+}
+
+#tabellaFatture th,
+#tabellaFatture td {
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+#tabellaFatture th:nth-child(2),
+#tabellaFatture td:nth-child(2) { min-width: 200px; }
+#tabellaFatture th:nth-child(3),
+#tabellaFatture td:nth-child(3) { min-width: 220px; }
+#tabellaFatture th:nth-child(5),
+#tabellaFatture td:nth-child(5) { min-width: 100px; }
+#tabellaFatture th:nth-child(6),
+#tabellaFatture td:nth-child(6) { min-width: 160px; }
+#tabellaFatture th:nth-child(7),
+#tabellaFatture td:nth-child(7) { min-width: 140px; }
+#tabellaFatture th:nth-child(8),
+#tabellaFatture td:nth-child(8) { min-width: 120px; }
+</style>
+
+<style>
+/* --- POPUP QR --- */
+#qr-popup,
+#qr-success {
+  backdrop-filter: blur(2px);
+}
+
+#qr-popup .popup-content,
+#qr-success .popup-content {
+  background: rgba(255,255,255,0.95);
+  border: 1px solid rgba(0,0,0,0.1);
+  border-radius: 12px;
+  padding: 22px 20px;
+  max-width: 360px;
+  width: 95%;
+  box-shadow: 0 8px 18px rgba(0,0,0,0.3);
+  text-align: center;
+}
+
+#qr-popup img {
+  width: 250px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+}
+
+#qr-popup p,
+#qr-success p {
+  margin: 0.3rem 0;
+  font-size: 0.9rem;
+  color: #1f2933;
+}
+
+#qrCaption {
+  font-weight: bold;
+  font-size: 1rem;
+  margin-top: 0.5rem;
+  color: #005599;
+}
+
+#qr-success .popup-content .h5 {
+  color: #0f5132;
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+#qr-success .btn-primary {
+  font-weight: 600;
+  padding: 0.6rem 1.75rem;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+}
+
+/* --- Responsive --- */
+@media (max-width: 576px) {
+  #qr-popup .popup-content,
+  #qr-success .popup-content {
+    max-width: 95%;
+    padding: 15px;
+  }
+
+  #qr-popup img {
+    width: 200px;
+  }
+
+  #qr-popup p,
+  #qr-success p {
+    font-size: 0.8rem;
+  }
+
+  #qrCaption {
+    font-size: 0.9rem;
+  }
+}
+</style>
+
+<script>
+async function mostraQR(fatturaId) {
+  try {
+    const res = await csrfFetch(`/api/fattura/${fatturaId}/qr`);
+    let data;
+    try {
+      data = await res.json();
+    } catch (_) {
+      throw new Error('Risposta non valida dal server');
+    }
+
+    if (!res.ok) {
+      throw new Error((data && data.error) || 'Errore nel caricamento del QR Code');
+    }
+
+    const imgSrc = data.qr_image || data.qr;
+    const caption = `Fattura #${data.numero || 'N/D'} - ${data.fornitore || ''}`;
+
+    if (!imgSrc) {
+      alert('Errore: QR Code non disponibile');
+      return;
+    }
+
+    let popup = document.getElementById('qr-popup');
+    if (!popup) {
+      popup = document.createElement('div');
+      popup.id = 'qr-popup';
+      popup.style.cssText = 'display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 9999; justify-content: center; align-items: center;';
+      popup.innerHTML = `
+        <div class="popup-content">
+          <div id="qr-code-container"></div>
+          <button onclick="document.getElementById('qr-popup').style.display='none'" class="btn btn-secondary mt-3">Chiudi</button>
+        </div>
+      `;
+      document.body.appendChild(popup);
+    }
+
+    const amountMatch = (data.sepa || '').match(/EUR([\d.]+)/);
+    const amount = amountMatch ? parseFloat(amountMatch[1]).toFixed(2) : '-';
+    const iban = (data.iban || (data.sepa || '').split('\n')[6]) || '-';
+
+    document.getElementById('qr-code-container').innerHTML = `
+      <img src="${imgSrc}" alt="QR Code SEPA"
+           style="width: 250px; border: 1px solid #ddd; border-radius: 8px;">
+      <p id="qrCaption" class="mt-2 fw-bold">${caption}</p>
+      <div class="text-start mt-2" style="font-size: 0.85rem; color:#333;">
+        <p><strong>Importo:</strong> &euro;${amount}</p>
+        <p><strong>IBAN:</strong> ${iban}</p>
+        <p><strong>Scadenza:</strong> ${data.data_scadenza || '-'}</p>
+        <p><strong>Categoria:</strong> ${data.categoria || '-'}</p>
+      </div>
+      <button type="button" class="btn btn-success mt-3 w-100 btn-confirm-payment" data-fattura-id="${fatturaId}">
+        <i class="bi bi-check-circle me-1"></i> Conferma pagamento
+      </button>
+    `;
+
+    popup.style.display = 'flex';
+  } catch (err) {
+    console.error('Errore QR:', err);
+    alert(err.message || "Impossibile caricare il QR Code. Contatta l'assistenza.");
+  }
+}
+
+function mostraSuccessoPagamento() {
+  let success = document.getElementById('qr-success');
+  if (!success) {
+    success = document.createElement('div');
+    success.id = 'qr-success';
+    success.style.cssText = 'display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 10000; justify-content: center; align-items: center;';
+    success.innerHTML = `
+      <div class="popup-content text-center">
+        <p class="h5 mb-3">&#9989; Bonifico effettuato con successo</p>
+        <button type="button" class="btn btn-primary btn-close-success">OK</button>
+      </div>
+    `;
+    success.addEventListener('click', ev => {
+      if (ev.target === success || ev.target.classList.contains('btn-close-success')) {
+        success.style.display = 'none';
+      }
+    });
+    document.body.appendChild(success);
+  }
+  success.style.display = 'flex';
+}
+
+window.mostraQR = mostraQR;
+window.mostraSuccessoPagamento = mostraSuccessoPagamento;
+
+
+document.addEventListener("DOMContentLoaded", async () => {
+  const toast = new bootstrap.Toast(document.getElementById("toast"));
+  let fornitoriCache = [];
+  const btnDettaglio = document.getElementById("btnDettaglioFornitori");
+  if (btnDettaglio) {
+    btnDettaglio.addEventListener("click", () => {
+      window.location.href = '/dettaglio_fornitori';
+    });
+  }
+  const categorie = [
+    "Alimentari (Food Cost)","Bevande","UtilitÃ  (Luce, acqua, gas)","Manutenzioni e riparazioni",
+    "Marketing e pubblicitÃ ","Licenze e assicurazioni","Commissioni (The Fork)","Lavanderia",
+    "Pulizia e igiene","Spese Varie","Varie"
+  ];
+  let tutteFatture = [];
+  
+    // --- Gestione localStorage ---
+  const LS_KEY = 'RISTOSMART_FATTURE';
+
+  function salvaInLocale() {
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify(tutteFatture));
+    } catch (e) {
+      console.warn("Impossibile salvare in localStorage", e);
+    }
+  }
+
+  function caricaDaLocale() {
+    try {
+      const saved = localStorage.getItem(LS_KEY);
+      if (saved) {
+        const localData = JSON.parse(saved);
+        return Array.isArray(localData) ? localData : [];
+      }
+    } catch (e) {
+      console.error("Errore lettura localStorage", e);
+      return null;
+    }
+    return null;
+  }
+
+  // ðŸ”Š Notifica vocale giornaliera
+  function checkDailyVoiceAlert(fatture) {
+      const oggi = new Date().toDateString();
+      const ultimoAvviso = localStorage.getItem("ultimo_avviso_vocale");
+      const utterance = new SpeechSynthesisUtterance();
+
+      const inScadenza = fatture.some(f => {
+          const scad = new Date(f.data_scadenza);
+          const giorni = Math.ceil((scad - new Date()) / (1000*60*60*24));
+          return f.stato !== "Pagato" && giorni <= 5 && giorni >= 0;
+      });
+
+      if (inScadenza && ultimoAvviso !== oggi) {
+          utterance.text = "Attenzione, hai delle fatture che scadono entro i prossimi 5 giorni.";
+          utterance.lang = "it-IT";
+          utterance.volume = 1;
+          utterance.rate = 0.9;
+          speechSynthesis.speak(utterance);
+          localStorage.setItem("ultimo_avviso_vocale", oggi);
+      }
+  }
+
+  // ðŸ”Š Bottone test voce
+  const btnTest = document.getElementById("testVoce");
+  if (window.currentUserEmail === "ristoconsulenze@gmail.com" && btnTest) {
+    btnTest.classList.remove("d-none");
+    btnTest.addEventListener("click", () => {
+      console.log("â–¶ Test voce cliccato");
+      const utterance = new SpeechSynthesisUtterance("Questo Ã¨ un test della voce sintetica.");
+      utterance.lang = "it-IT";
+      utterance.volume = 1;
+      utterance.rate = 0.9;
+      speechSynthesis.speak(utterance);
+    });
+  }
+  
+  // Carica fornitori e categorie
+  async function caricaFornitoriCategorie(){
+    const selF = document.getElementById("fornitore");
+    const selC = document.getElementById("categoria");
+    selF.innerHTML = `<option value="">-- Seleziona --</option>`;
+    selC.innerHTML = `<option value="">-- Seleziona --</option>`;
+    
+    try {
+      const resp = await csrfFetch("/api/fornitori");
+      fornitoriCache = await resp.json();
+      fornitoriCache.forEach(f => {
+        const opt = document.createElement("option");
+        opt.value = f.nomeFornitore;
+        opt.textContent = f.nomeFornitore;
+        opt.dataset.categoria = f.categoria;
+        selF.appendChild(opt);
+      });
+      selF.addEventListener("change", () => {
+        const selectedOpt = selF.options[selF.selectedIndex];
+        selC.value = selectedOpt.dataset.categoria || "";
+      });
+    } catch(e) { console.error(e); }
+
+    categorie.forEach(cat => {
+      const opt = document.createElement("option");
+      opt.value = cat; opt.textContent = cat;
+      selC.appendChild(opt);
+    });
+  }
+  caricaFornitoriCategorie();
+
+  // Mostra notifiche
+  function mostraNotifiche(fatture) {
+    const notificheDiv = document.getElementById("notifiche");
+    const oggi = new Date();
+    const inScadenza = fatture.filter(f => {
+      const scad = new Date(f.data_scadenza);
+      const giorni = Math.ceil((scad - oggi) / (1000*60*60*24));
+      return f.stato !== "Pagato" && giorni <= 5 && giorni >= 0;
+    });
+
+    if (inScadenza.length === 0) {
+      notificheDiv.className = "alert alert-success";
+      notificheDiv.textContent = "Perfetto! Non hai fatture in scadenza.";
+    } else {
+      notificheDiv.className = "alert alert-warning";
+      notificheDiv.innerHTML = `
+        <strong>Attenzione!</strong> Hai ${inScadenza.length} fattura(e) in scadenza:
+        <ul>${inScadenza.map(f =>
+          `<li><strong>${(f.fornitore || "").trim() || "Senza fornitore"}</strong>: â‚¬${parseFloat(f.importo).toFixed(2)} 
+           (scade il ${new Date(f.data_scadenza).toLocaleDateString()})</li>`
+        ).join("")}</ul>
+      `;
+    }
+    notificheDiv.classList.remove("d-none");
+  }
+
+  // ➤ Aggiunge riga in tabella
+  function aggiungiRiga(f) {
+    const tr = document.createElement("tr");
+
+    // Fornitori
+    let fornOpt = `<option value="">-- Seleziona --</option>`;
+    fornitoriCache.forEach(ff => {
+      fornOpt += `<option value="${ff.nomeFornitore}" ${ff.nomeFornitore === f.fornitore ? "selected" : ""}>${ff.nomeFornitore}</option>`;
+    });
+    if (f.fornitore && !fornitoriCache.some(ff => ff.nomeFornitore === f.fornitore)) {
+      fornOpt += `<option value="${f.fornitore}" selected>${f.fornitore}</option>`;
+    }
+
+    // Categorie
+    let catOpt = `<option value="">-- Seleziona --</option>`;
+    categorie.forEach(c => {
+      catOpt += `<option value="${c}" ${c === f.categoria ? "selected" : ""}>${c}</option>`;
+    });
+
+    // Stati
+    const stati = ["Pagato", "Non pagato", "Stand by"];
+    let statoOpt = "";
+    stati.forEach(s => {
+      statoOpt += `<option value="${s}" ${s === f.stato ? "selected" : ""}>${s}</option>`;
+    });
+
+    // --- bottone Paga dinamico
+    let btnPagaHtml;
+    if (f.stato === "Pagato") {
+      btnPagaHtml = `<button class="btn btn-secondary btn-sm btn-paga" disabled>
+                      <i class="bi bi-check2-circle"></i> Pagato
+                    </button>`;
+    } else {
+      btnPagaHtml = `<button class="btn btn-outline-success btn-sm btn-paga">
+                      <i class="bi bi-credit-card"></i> Paga
+                    </button>`;
+    }
+
+    tr.innerHTML = `
+      <td><input type="date" class="form-control form-control-sm data-input bg-white" value="${f.data_inserimento || ''}" disabled></td>
+      <td><select class="form-select form-select-sm fornitore-input bg-white" disabled>${fornOpt}</select></td>
+      <td><select class="form-select form-select-sm categoria-input bg-white" disabled>${catOpt}</select></td>
+      <td><input type="date" class="form-control form-control-sm scadenza-input bg-white" value="${f.data_scadenza || ''}" disabled></td>
+      <td><input type="number" step="0.01" class="form-control form-control-sm importo-input bg-white" value="${f.importo ? parseFloat(f.importo).toFixed(2) : ''}" disabled></td>
+      <td><select class="form-select form-select-sm stato-input bg-white" disabled>${statoOpt}</select></td>
+      <td><input type="text" class="form-control form-control-sm numero-input bg-white" value="${f.numero || ''}" disabled></td>
+      <td class="text-end">
+        <div class="d-flex justify-content-end gap-1">
+          <button class="btn btn-outline-primary btn-sm btn-edit"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-outline-success btn-sm btn-save d-none"><i class="bi bi-save"></i></button>
+          ${btnPagaHtml}
+          <button class="btn btn-outline-danger btn-sm btn-delete"><i class="bi bi-trash"></i></button>
+        </div>
+      </td>
+    `;
+
+    // 🔗 associa ID fattura
+    tr.dataset.id = f.id;
+
+    // Colori coerenti
+    aggiornaColoriRiga(tr, f);
+
+    document.querySelector("#tabellaFatture tbody").appendChild(tr);
+  }
+
+  
+  // Colori riga
+  function aggiornaColoriRiga(tr, f) {
+    const today = new Date();
+    const scadenza = f.data_scadenza ? new Date(f.data_scadenza) : null;
+    const diffDays = scadenza ? Math.ceil((scadenza - today) / (1000 * 60 * 60 * 24)) : null;
+
+    // reset di base (nero normale)
+    tr.querySelectorAll("input,select").forEach(el => {
+      el.style.color = "#000";
+      el.style.fontWeight = "normal";
+      el.style.animation = "none";
+    });
+
+    if (f.stato === "Pagato") {
+      tr.querySelectorAll("input,select").forEach(el => {
+        el.style.color = "#00aa00";  // verde
+        el.style.fontWeight = "bold";
+      });
+    } else if (f.stato === "Non pagato" && diffDays !== null && diffDays <= 5 && diffDays >= 0) {
+      tr.querySelectorAll("input,select").forEach(el => {
+        el.style.color = "#cc0000";  // rosso
+        el.style.fontWeight = "bold";
+        el.style.animation = "blink-10s 10s infinite";
+      });
+    } else if (f.stato === "Stand by") {
+      tr.querySelectorAll("input,select").forEach(el => {
+        el.style.color = "#e6b800";  // giallo
+        el.style.fontWeight = "bold";
+      });
+    }
+  }
+  
+  // âž• Aggiungi fattura
+  document.getElementById("btnAggiungi").addEventListener("click", async () => {
+    const nuovaFattura = {
+      data_inserimento: document.getElementById("dataInserimento").value,
+      fornitore: document.getElementById("fornitore").value,
+      categoria: document.getElementById("categoria").value,
+      data_scadenza: document.getElementById("dataScadenza").value,
+      importo: parseFloat(document.getElementById("importo").value || 0),
+      stato: document.getElementById("stato").value,
+      numero: document.getElementById("numero").value
+    };
+
+    const res = await csrfFetch("/api/fatture", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(nuovaFattura)
+    });
+
+    if (res.ok) {
+      const saved = await res.json();
+
+      // aggiungo riga alla tabella
+      aggiungiRiga(saved);
+
+      // aggiorno lista globale
+      tutteFatture.push(saved);
+      salvaInLocale();
+
+      // toast conferma
+      document.getElementById("toastMsg").textContent = "Fattura salvata!";
+      toast.show();
+
+      localStorage.setItem("fatture_update_trigger", Date.now());
+
+      // reset form
+      resetForm();
+
+      // aggiorno notifiche + voce
+      mostraNotifiche(tutteFatture);
+      checkDailyVoiceAlert(tutteFatture);
+    }
+  });
+
+  function resetForm(){
+    document.querySelectorAll("#dataInserimento,#fornitore,#categoria,#dataScadenza,#importo,#stato,#numero").forEach(el=>el.value="");
+    document.getElementById("stato").value="Non pagato";
+  }
+  
+    // ðŸ“¦ Caricamento iniziale
+    try {
+        const resFatt = await csrfFetch("/api/fatture");
+        let fatture = [];
+
+        if (!resFatt.ok) {
+        const errorText = await resFatt.text();
+        console.error("Errore API /api/fatture:", errorText);
+
+        // ðŸ” Tentativo di recupero da locale
+        const localData = caricaDaLocale();
+        if (localData && localData.length > 0) {
+            fatture = localData;
+            document.getElementById("notifiche").innerHTML = `
+            <strong>âš ï¸ Offline:</strong> Dati caricati da locale. Sincronizza appena possibile.
+            `;
+            document.getElementById("notifiche").className = "alert alert-warning";
+            document.getElementById("notifiche").classList.remove("d-none");
+        } else {
+            throw new Error("API fallita e nessun dato locale");
+        }
+        } else {
+        fatture = await resFatt.json();
+        // âœ… Sovrascrivi localStorage con dati freschi dal server
+        tutteFatture = [...fatture];
+        salvaInLocale();
+        }
+
+        tutteFatture = [...fatture];
+        fatture.forEach(f => aggiungiRiga(f));
+
+        mostraNotifiche(tutteFatture);
+        checkDailyVoiceAlert(tutteFatture);
+
+    } catch (e) {
+        console.error("Eccezione durante caricamento fatture:", e);
+        document.getElementById("notifiche").innerHTML = `
+        <strong>âŒ Errore:</strong> Impossibile caricare le fatture.
+        `;
+        document.getElementById("notifiche").className = "alert alert-danger";
+        document.getElementById("notifiche").classList.remove("d-none");
+    }
+
+  // ðŸ”„ Azioni
+
+  async function confermaPagamento(fatturaId, triggerBtn) {
+    if (!fatturaId) return;
+    let originalContent = triggerBtn ? triggerBtn.innerHTML : null;
+    if (triggerBtn) {
+      triggerBtn.disabled = true;
+      triggerBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Salvo...';
+    }
+    try {
+      const tr = document.querySelector(`#tabellaFatture tbody tr[data-id="${fatturaId}"]`);
+      if (!tr) throw new Error("Fattura non trovata nell'elenco.");
+
+      const payload = {
+        data_inserimento: tr.querySelector('.data-input').value,
+        fornitore: tr.querySelector('.fornitore-input').value,
+        categoria: tr.querySelector('.categoria-input').value,
+        data_scadenza: tr.querySelector('.scadenza-input').value,
+        importo: parseFloat(tr.querySelector('.importo-input').value || 0),
+        stato: 'Pagato',
+        numero: tr.querySelector('.numero-input').value
+      };
+
+      const res = await csrfFetch(`/api/fatture/${fatturaId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      let saved = null;
+      try {
+        saved = await res.json();
+      } catch (_) {
+        saved = null;
+      }
+
+      if (!res.ok) {
+        throw new Error((saved && saved.error) || 'Errore nel salvataggio della fattura.');
+      }
+
+      const updated = saved || { ...payload, id: Number(fatturaId) };
+
+      tr.querySelectorAll('.stato-input').forEach(sel => { sel.value = 'Pagato'; });
+      const importoInput = tr.querySelector('.importo-input');
+      if (importoInput && updated.importo !== undefined) {
+        importoInput.value = parseFloat(updated.importo).toFixed(2);
+      }
+
+      tr.querySelectorAll('input,select').forEach(el => el.disabled = true);
+      aggiornaColoriRiga(tr, updated);
+
+      const editBtn = tr.querySelector('.btn-edit');
+      const saveBtn = tr.querySelector('.btn-save');
+      if (editBtn) editBtn.classList.remove('d-none');
+      if (saveBtn) saveBtn.classList.add('d-none');
+
+      const idxData = tutteFatture.findIndex(f => f.id == updated.id);
+      if (idxData >= 0) {
+        tutteFatture[idxData] = updated;
+      } else {
+        tutteFatture.push(updated);
+      }
+      salvaInLocale();
+      mostraNotifiche(tutteFatture);
+      localStorage.setItem('fatture_update_trigger', Date.now());
+
+      document.getElementById('toastMsg').textContent = 'Pagamento confermato!';
+      toast.show();
+
+      const popup = document.getElementById('qr-popup');
+      if (popup) popup.style.display = 'none';
+      if (typeof window.mostraSuccessoPagamento === 'function') {
+        window.mostraSuccessoPagamento();
+      }
+
+      // 🔒 Disabilita definitivamente il bottone "Paga" per evitare doppi pagamenti
+      const pagaBtn = tr.querySelector(".btn-paga");
+      if (pagaBtn) {
+        pagaBtn.disabled = true;
+        pagaBtn.innerHTML = '<i class="bi bi-check2-circle"></i> Pagato';
+        pagaBtn.classList.remove("btn-outline-success");
+        pagaBtn.classList.add("btn-secondary");
+      }
+    } catch (err) {
+      console.error('Errore conferma pagamento:', err);
+      alert(err.message || 'Impossibile confermare il pagamento.');
+    } finally {
+      if (triggerBtn) {
+        triggerBtn.disabled = false;
+        triggerBtn.innerHTML = originalContent || 'Conferma pagamento';
+      }
+    }
+  }
+
+  document.addEventListener('click', async e => {
+    const btn = e.target.closest('.btn-confirm-payment');
+    if (!btn) return;
+    const fatturaId = btn.dataset.fatturaId;
+    if (!fatturaId) return;
+    await confermaPagamento(fatturaId, btn);
+  });
+
+  document.getElementById("tabellaFatture").addEventListener("click", async e => {
+    const tr = e.target.closest("tr"); 
+    if (!tr) return;
+    const id = tr.dataset.id;
+
+    // âœï¸ Modifica
+    if (e.target.closest(".btn-edit")) {
+      tr.querySelectorAll("input,select").forEach(el => el.disabled = false);
+      tr.querySelector(".btn-edit").classList.add("d-none");
+      tr.querySelector(".btn-save").classList.remove("d-none");
+    }
+
+    // Paga -> mostra QR
+    else if (e.target.closest(".btn-paga")) {
+      mostraQR(id);
+    }
+
+    // Salva modifiche
+    else if (e.target.closest(".btn-save")) {
+      const nuovo = {
+        data_inserimento: tr.querySelector(".data-input").value,
+        fornitore: tr.querySelector(".fornitore-input").value,
+        categoria: tr.querySelector(".categoria-input").value,
+        data_scadenza: tr.querySelector(".scadenza-input").value,
+        importo: parseFloat(tr.querySelector(".importo-input").value || 0),
+        stato: tr.querySelector(".stato-input").value,
+        numero: tr.querySelector(".numero-input").value
+      };
+
+      try {
+        const res = await csrfFetch(`/api/fatture/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(nuovo)
+        });
+
+        if (res.ok) {
+          const saved = await res.json();
+
+          // Forza due decimali
+          tr.querySelector(".importo-input").value = parseFloat(saved.importo).toFixed(2);
+
+          // âœ… Aggiorna colori in base allo stato e scadenza
+          aggiornaColoriRiga(tr, saved);
+
+          // Aggiorna UI
+          tr.querySelectorAll("input,select").forEach(el => el.disabled = true);
+          tr.querySelector(".btn-edit").classList.remove("d-none");
+          tr.querySelector(".btn-save").classList.add("d-none");
+
+          // Toast
+          document.getElementById("toastMsg").textContent = "Fattura aggiornata!";
+          toast.show();
+
+          localStorage.setItem("fatture_update_trigger", Date.now());
+
+          // Aggiorna dati locali
+          const idx = tutteFatture.findIndex(f => f.id == id);
+          if (idx >= 0) tutteFatture[idx] = saved;
+          salvaInLocale();
+          mostraNotifiche(tutteFatture);
+        } else {
+          console.error("Errore API:", await res.text());
+          alert("Errore nel salvataggio della fattura.");
+        }
+      } catch (err) {
+        console.error("Eccezione in update fattura:", err);
+        alert("Errore di rete. Controlla la console.");
+      }
+    }
+
+    // ðŸ—‘ï¸ Elimina â†’ âœ… FIXATO: usa csrfFetch + DELETE
+    else if (e.target.closest(".btn-delete")) {
+      if (!confirm("Vuoi eliminare questa fattura?")) return;
+
+      try {
+        const res = await csrfFetch(`/api/fatture/${id}`, { method: "DELETE" });
+        if (res.ok) {
+          tr.remove();
+          document.getElementById("toastMsg").textContent = "Fattura eliminata!";
+          toast.show();
+
+          localStorage.setItem("fatture_update_trigger", Date.now());
+
+          tutteFatture = tutteFatture.filter(f => f.id != id);
+          salvaInLocale();
+          mostraNotifiche(tutteFatture);
+        } else {
+          console.error("Errore DELETE:", await res.text());
+          alert("Impossibile eliminare la fattura.");
+        }
+      } catch (err) {
+        console.error("Errore elimina fattura:", err);
+        alert("Errore di rete. Controlla la console.");
+      }
+    }
+
+  });
+
+  // ðŸ” FILTRO PER STATO
+  document.getElementById("filtroStato").addEventListener("change", () => {
+    const filtro = document.getElementById("filtroStato").value;
+    const rows = document.querySelectorAll("#tabellaFatture tbody tr");
+    rows.forEach(tr => {
+      const statoCell = tr.querySelector(".stato-input");
+      const stato = statoCell ? statoCell.value : "";
+      tr.style.display = !filtro || stato === filtro ? "" : "none";
+    });
+  });
+
+  // ðŸ’¾ ESPORTA CSV
+  document.getElementById("btnEsportaCSV").addEventListener("click", () => {
+    const headers = ["Data", "Fornitore", "Categoria", "Scadenza", "Importo", "Stato", "Numero"];
+    const rows = Array.from(document.querySelectorAll("#tabellaFatture tbody tr"))
+      .filter(tr => window.getComputedStyle(tr).display !== "none")
+      .map(tr => {
+        const inputs = tr.querySelectorAll("input, select");
+        return [
+          inputs[0].value,
+          inputs[1].value,
+          inputs[2].value,
+          inputs[3].value,
+          parseFloat(inputs[4].value || 0).toFixed(2),
+          inputs[5].value,
+          inputs[6].value
+        ];
+      });
+    rows.unshift(headers);
+    const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `fatture_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+});
+
+</script>
+
+
+
+{% endblock %}
+
+

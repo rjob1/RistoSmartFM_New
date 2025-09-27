@@ -1,0 +1,308 @@
+{% extends 'base.html' %}
+
+{% block title %}Dettaglio Spese per Fornitore - RistoSmart FM{% endblock %}
+
+{% block head %}
+<style>
+  .filter-group {
+    margin-bottom: 1rem;
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .filter-group label {
+    margin: 0;
+    font-size: 0.875rem;
+    color: #333;
+  }
+
+  .table thead th {
+    background-color: #e9ecef;
+    font-weight: 600;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .table tbody td {
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .btn-pdf {
+    background-color: #0d6efd;
+    color: white;
+    padding: 0.375rem 0.75rem;
+    border-radius: 4px;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+  }
+
+  @media (max-width: 768px) {
+    .filter-group {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .btn-pdf {
+      width: 100%;
+      justify-content: center;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4 px-4">
+  <div class="row mb-4">
+    <div class="col-12">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h3><i class="bi bi-box-seam"></i> Dettaglio Spese per Fornitore</h3>
+        <a href="#" class="btn-pdf" onclick="scaricaPdf(); return false;">
+          <i class="bi bi-file-earmark-pdf"></i> Scarica PDF
+        </a>
+      </div>
+
+      <!-- Filtri -->
+      <div class="filter-group">
+        <div style="flex: 1; min-width: 180px;">
+          <label>Filtro fornitore:</label>
+          <select id="filtroFornitore" class="form-select form-select-sm" onchange="filtra()">
+            <option value="">-- Tutti --</option>
+          </select>
+        </div>
+        <div style="flex: 1; min-width: 180px;">
+          <label>Filtro categoria:</label>
+          <select id="filtroCategoria" class="form-select form-select-sm" onchange="filtra()">
+            <option value="">-- Tutte --</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tabella riepilogo -->
+  <div class="row">
+    <div class="col-12">
+      <div class="table-responsive">
+        <table class="table table-bordered table-striped">
+          <thead>
+            <tr>
+              <th>Fornitore</th>
+              <th>Categoria</th>
+              <th>Gennaio</th>
+              <th>Febbraio</th>
+              <th>Marzo</th>
+              <th>Aprile</th>
+              <th>Maggio</th>
+              <th>Giugno</th>
+              <th>Luglio</th>
+              <th>Agosto</th>
+              <th>Settembre</th>
+              <th>Ottobre</th>
+              <th>Novembre</th>
+              <th>Dicembre</th>
+              <th>Totale Annuale</th>
+            </tr>
+          </thead>
+          <tbody id="tabellaFornitori">
+            <!-- Dati popolati da JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const mesi = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
+                "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];  
+
+  // === Generazione PDF ===
+  function scaricaPdf() {
+    try {
+      if (!window.jspdf) throw new Error("jsPDF non disponibile");
+
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF('landscape', 'mm', 'a4');
+      const margin = 10;
+      const colWidth = (297 - 2 * margin - 15 * 2) / 15;
+      let y = 20;
+
+      // Titolo
+      doc.setFontSize(16);
+      doc.text("Dettaglio Spese per Fornitore", margin, y);
+      y += 8;
+
+      // Data generazione
+      doc.setFontSize(10);
+      doc.setTextColor(100);
+      doc.text(`Generato il: ${new Date().toLocaleDateString('it-IT')}`, margin, y);
+      y += 10;
+
+      // Intestazioni
+      doc.setFontSize(9);
+      doc.setFont(undefined, 'bold');
+      const headers = [
+        "Forn.", "Cat.", "Gen", "Feb", "Mar", "Apr", "Mag", "Giu",
+        "Lug", "Ago", "Set", "Ott", "Nov", "Dic", "Tot."
+      ];
+      headers.forEach((text, i) => {
+        doc.text(text, margin + i * (colWidth + 2), y);
+      });
+      y += 6;
+
+      // Dati
+      doc.setFont(undefined, 'normal');
+      doc.setFontSize(8);
+
+      const rows = Array.from(document.querySelectorAll("#tabellaFornitori tr"))
+        .filter(tr => getComputedStyle(tr).display !== "none");
+
+      for (const tr of rows) {
+        const cells = Array.from(tr.cells);
+        for (let i = 0; i < cells.length; i++) {
+          const text = cells[i].textContent.trim();
+          doc.text(text, margin + i * (colWidth + 2), y);
+        }
+        y += 5;
+        if (y > 190) {
+          doc.addPage();
+          y = 20;
+        }
+      }
+
+      // Salva
+      doc.save(`dettaglio_fornitori_${new Date().getFullYear()}.pdf`);
+
+    } catch (err) {
+      console.error("Errore nella generazione del PDF:", err);
+      alert("Impossibile generare il PDF. jsPDF non è stato caricato.");
+    }
+  }
+
+  // === Carica dati da API ===
+  async function caricaDati() {
+    try {
+      const response = await fetch(`/api/dettaglio_fornitori?anno={{ anno }}`);
+      if (!response.ok) throw new Error("Errore caricamento dati");
+      const data = await response.json();
+
+      // Popola filtri
+      popolaFiltri(data);
+
+      // Mostra dati
+      mostraTabella(data);
+    } catch (err) {
+      console.error("Errore:", err);
+      alert("Impossibile caricare i dati.");
+    }
+  }
+
+  function popolaFiltri(data) {
+    const fornitori = [...new Set(data.map(d => d.fornitore))].sort();
+    const categorie = [...new Set(data.map(d => d.categoria))].sort();
+
+    const selectFornitore = document.getElementById("filtroFornitore");
+    const selectCategoria = document.getElementById("filtroCategoria");
+
+    fornitoreOptions(fornitori, selectFornitore);
+    categoriaOptions(categorie, selectCategoria);
+  }
+
+  function fornitoreOptions(items, el) {
+    const current = el.value;
+    el.innerHTML = '<option value="">-- Tutti --</option>';
+    items.forEach(item => {
+      const opt = document.createElement("option");
+      opt.value = item;
+      opt.textContent = item;
+      if (item === current) opt.selected = true;
+      el.appendChild(opt);
+    });
+  }
+
+  function categoriaOptions(items, el) {
+    const current = el.value;
+    el.innerHTML = '<option value="">-- Tutte --</option>';
+    items.forEach(item => {
+      const opt = document.createElement("option");
+      opt.value = item;
+      opt.textContent = item;
+      if (item === current) opt.selected = true;
+      el.appendChild(opt);
+    });
+  }
+
+  function mostraTabella(data) {
+    const tbody = document.getElementById("tabellaFornitori");
+    tbody.innerHTML = "";
+
+    data.forEach(row => {
+      const tr = document.createElement("tr");
+
+      // Fornitore e Categoria
+      const tdFornitore = document.createElement("td");
+      tdFornitore.textContent = row.fornitore;
+      tr.appendChild(tdFornitore);
+
+      const tdCategoria = document.createElement("td");
+      tdCategoria.textContent = row.categoria;
+      tr.appendChild(tdCategoria);
+
+      // Mesi
+      for (let i = 0; i < 12; i++) {
+        const td = document.createElement("td");
+        td.textContent = formatEuro(row.mesi[i]);
+        tr.appendChild(td);
+      }
+
+      // Totale annuale
+      const tdTotale = document.createElement("td");
+      tdTotale.textContent = formatEuro(row.totaleAnnuale);
+      tdTotale.style.fontWeight = "bold";
+      tr.appendChild(tdTotale);
+
+      tbody.appendChild(tr);
+    });
+
+    filtra(); // Applica filtri
+  }
+
+  function formatEuro(val) {
+    const n = Number.isFinite(val) ? val : parseFloat(val) || 0;
+    return n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+  }
+
+  function filtra() {
+    const filtroFornitore = document.getElementById("filtroFornitore").value.toLowerCase();
+    const filtroCategoria = document.getElementById("filtroCategoria").value.toLowerCase();
+    const righe = document.querySelectorAll("#tabellaFornitori tr");
+
+    righe.forEach(tr => {
+      const celle = tr.cells;
+      const nome = celle[0].textContent.trim().toLowerCase();
+      const cat = celle[1].textContent.trim().toLowerCase();
+
+      const matchFornitore = !filtroFornitore || nome.includes(filtroFornitore);
+      const matchCategoria = !filtroCategoria || cat.includes(filtroCategoria);
+
+      tr.style.display = matchFornitore && matchCategoria ? "" : "none";
+    });
+  }
+
+  // === Eventi all'avvio ===
+  window.addEventListener("storage", (e) => {
+    if (e.key === "fatture_update_trigger") {
+      caricaDati();
+    }
+  });
+
+  document.addEventListener("DOMContentLoaded", () => {
+    caricaDati();
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+
+{% block title %}RistoSmartFM / Fornitori{% endblock %}
+
+{% block content %}
+<div class="container my-4">
+  <h2 class="mb-4 text-center" style="color:#336699;">Gestione Fornitori</h2>
+
+  <!-- Form Inserimento Fornitore -->
+  <form id="fornitoriForm" class="row g-3 mb-4">
+    <div class="col-md-4">
+      <label for="nomeFornitore" class="form-label">Nome fornitore</label>
+      <input type="text" class="form-control" id="nomeFornitore" required>
+    </div>
+    <div class="col-md-4">
+      <label for="nomeAgente" class="form-label">Nome agente</label>
+      <input type="text" class="form-control" id="nomeAgente">
+    </div>
+    <div class="col-md-4">
+      <label for="categoria" class="form-label">Categoria</label>
+      <select id="categoria" class="form-select">
+        <option value="">-- Seleziona --</option>
+        <option>Alimentari (Food Cost)</option>
+        <option>Bevande</option>
+        <option>Utilità (Luce, acqua, gas)</option>
+        <option>Manutenzioni e riparazioni</option>
+        <option>Marketing e pubblicità</option>
+        <option>Licenze e assicurazioni</option>
+        <option>Commissioni (The Fork)</option>
+        <option>Lavanderia</option>
+        <option>Pulizia e igiene</option>
+        <option>Spese Varie</option>
+        <option>Varie</option>
+      </select>
+    </div>
+
+    <div class="col-md-4">
+      <label for="telAgente" class="form-label">Telefono agente</label>
+      <input type="text" class="form-control" id="telAgente">
+    </div>
+    <div class="col-md-4">
+      <label for="telAzienda" class="form-label">Telefono azienda</label>
+      <input type="text" class="form-control" id="telAzienda">
+    </div>
+    <div class="col-md-4">
+      <label for="indirizzo" class="form-label">Indirizzo</label>
+      <input type="text" class="form-control" id="indirizzo">
+    </div>
+
+    <div class="col-md-6">
+      <label for="iban" class="form-label">IBAN</label>
+      <input type="text" class="form-control" id="iban" required>
+    </div>
+    <div class="col-md-6">
+      <label for="bic" class="form-label">BIC (opzionale)</label>
+      <input type="text" class="form-control" id="bic">
+    </div>
+
+    <div class="col-md-12">
+      <label for="note" class="form-label">Note</label>
+      <textarea class="form-control" id="note" rows="1"></textarea>
+    </div>
+
+    <div class="col-12 text-center">
+      <button type="submit" class="btn btn-primary">Aggiungi Fornitore</button>
+    </div>
+  </form>
+  
+  <!-- Tabella Fornitori -->
+  <div class="table-responsive">
+    <table class="table table-bordered table-header-blue" id="fornitoriTable">
+      <thead>
+        <tr>
+          <th>Nome Fornitore</th>
+          <th>Agente</th>
+          <th>Categoria</th>
+          <th>Tel. Agente</th>
+          <th>Tel. Azienda</th>
+          <th>Indirizzo</th>
+          <th>IBAN</th>
+          <th>BIC</th>
+          <th>Note</th>
+          <th>Azioni</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- Le righe verranno caricate da LocalStorage -->
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ✅ Funzione toast popup verde
+function showToast(msg) {
+  const toast = document.createElement("div");
+  toast.className = "toast-popup";
+  toast.textContent = msg;
+  document.body.appendChild(toast);
+
+  void toast.offsetWidth;
+  toast.classList.add("show");
+
+  setTimeout(() => {
+    toast.classList.remove("show");
+    setTimeout(() => toast.remove(), 400);
+  }, 2000);
+}
+
+// Utility: trasforma cella in input
+function makeEditable(td, value) {
+  td.innerHTML = `<input type="text" class="form-control form-control-sm" value="${value}">`;
+}
+
+function normalizeFornitore(raw = {}) {
+  const obj = raw || {};
+  const toStr = (val) => (val === undefined || val === null) ? '' : String(val).trim();
+  return {
+    id: obj.id ?? obj.ID ?? null,
+    nomeFornitore: toStr(obj.nomeFornitore ?? obj.nomefornitore ?? obj.nome ?? ''),
+    nomeAgente: toStr(obj.nomeAgente ?? ''),
+    categoria: toStr(obj.categoria ?? ''),
+    telAgente: toStr(obj.telAgente ?? ''),
+    telAzienda: toStr(obj.telAzienda ?? ''),
+    indirizzo: toStr(obj.indirizzo ?? ''),
+    iban_beneficiario: toStr(obj.iban_beneficiario ?? obj.iban ?? ''),
+    bic_beneficiario: toStr(obj.bic_beneficiario ?? obj.bic ?? ''),
+    note: toStr(obj.note ?? '')
+  };
+}
+
+// Estrai dati da una riga tabella
+function getRowData(row) {
+  const cells = row.querySelectorAll("td");
+  return normalizeFornitore({
+    id: row.dataset.id || null,
+    nomeFornitore: cells[0].textContent.trim(),
+    nomeAgente: cells[1].textContent.trim(),
+    categoria: cells[2].textContent.trim(),
+    telAgente: cells[3].textContent.trim(),
+    telAzienda: cells[4].textContent.trim(),
+    indirizzo: cells[5].textContent.trim(),
+    iban_beneficiario: cells[6].textContent.trim(),
+    bic_beneficiario: cells[7].textContent.trim(),
+    note: cells[8].textContent.trim()
+  });
+}
+
+function syncLocalStorage(fornitori) {
+  const normalized = (fornitori || []).map(normalizeFornitore);
+  localStorage.setItem("fornitori", JSON.stringify(normalized));
+}
+
+function getLocalFornitori() {
+  try {
+    const raw = JSON.parse(localStorage.getItem("fornitori") || "[]");
+    if (!Array.isArray(raw)) return [];
+    return raw.map(normalizeFornitore);
+  } catch (err) {
+    console.error("Errore lettura fornitori locale", err);
+    return [];
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const table = document.getElementById("fornitoriTable");
+  const tbody = table.querySelector("tbody");
+  const form = document.getElementById("fornitoriForm");
+
+  async function loadFornitori() {
+    try {
+      const resp = await csrfFetch("/api/fornitori");
+      const data = await resp.json();
+      const normalized = Array.isArray(data) ? data.map(normalizeFornitore) : [];
+
+      syncLocalStorage(normalized);
+      tbody.innerHTML = "";
+
+      normalized.forEach(f => {
+        const tr = document.createElement("tr");
+        tr.dataset.id = f.id ?? "";
+        tr.innerHTML = `
+          <td>${f.nomeFornitore || ''}</td>
+          <td>${f.nomeAgente || ''}</td>
+          <td>${f.categoria || ''}</td>
+          <td>${f.telAgente || ''}</td>
+          <td>${f.telAzienda || ''}</td>
+          <td>${f.indirizzo || ''}</td>
+          <td>${f.iban_beneficiario}</td>
+          <td>${f.bic_beneficiario}</td>
+          <td>${f.note || ''}</td>
+          <td class="text-center">
+            <button class="btn btn-sm btn-outline-primary me-1 editBtn"><i class="bi bi-pencil"></i></button>
+            <button class="btn btn-sm btn-outline-success me-1 saveBtn" style="display:none;"><i class="bi bi-save"></i></button>
+            <button class="btn btn-sm btn-outline-danger deleteBtn"><i class="bi bi-trash"></i></button>
+          </td>`;
+        tbody.appendChild(tr);
+      });
+    } catch (err) {
+      console.error("Errore caricamento fornitori", err);
+    }
+  }
+
+  loadFornitori();
+
+  table.addEventListener("click", async (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    const row = btn.closest("tr");
+
+    if (btn.classList.contains("editBtn")) {
+      const cells = row.querySelectorAll("td");
+      for (let i = 0; i < cells.length - 1; i++) {
+        makeEditable(cells[i], cells[i].textContent.trim());
+      }
+      row.querySelector(".editBtn").style.display = "none";
+      row.querySelector(".saveBtn").style.display = "inline-block";
+    }
+
+    if (btn.classList.contains("saveBtn")) {
+      const cells = row.querySelectorAll("td");
+      for (let i = 0; i < cells.length - 1; i++) {
+        const input = cells[i].querySelector("input");
+        if (input) cells[i].textContent = input.value.trim();
+      }
+      row.querySelector(".editBtn").style.display = "inline-block";
+      row.querySelector(".saveBtn").style.display = "none";
+
+      const updated = getRowData(row);
+
+      let fornitori = getLocalFornitori();
+      const idx = fornitori.findIndex(f => f.id == updated.id);
+      if (idx >= 0) fornitori[idx] = updated;
+      syncLocalStorage(fornitori);
+
+      try {
+        await csrfFetch(`/api/fornitori/${updated.id}`, {
+          method: "PUT",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(updated)
+        });
+        showToast("✔️ Fornitore aggiornato!");
+        await loadFornitori();
+      } catch (err) {
+        console.error("Errore update DB", err);
+      }
+    }
+
+    if (btn.classList.contains("deleteBtn")) {
+      if (confirm("Vuoi davvero eliminare questo fornitore?")) {
+        const id = row.dataset.id;
+        let fornitori = getLocalFornitori();
+        fornitori = fornitori.filter(f => f.id != id);
+        syncLocalStorage(fornitori);
+
+        try {
+          await csrfFetch(`/api/fornitori/${id}`, { method: "DELETE" });
+          showToast("🗑️ Fornitore eliminato!");
+        } catch (err) {
+          console.error("Errore delete DB", err);
+        }
+
+        await loadFornitori();
+        row.remove();
+      }
+    }
+  });
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    const nuovoFornitore = normalizeFornitore({
+      nomeFornitore: document.getElementById("nomeFornitore").value.trim(),
+      nomeAgente: document.getElementById("nomeAgente").value.trim(),
+      categoria: document.getElementById("categoria").value,
+      telAgente: document.getElementById("telAgente").value.trim(),
+      telAzienda: document.getElementById("telAzienda").value.trim(),
+      indirizzo: document.getElementById("indirizzo").value.trim(),
+      iban_beneficiario: document.getElementById("iban").value.trim(),
+      bic_beneficiario: document.getElementById("bic").value.trim(),
+      note: document.getElementById("note").value.trim()
+    });
+
+    try {
+      const resp = await csrfFetch("/api/fornitori", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(nuovoFornitore)
+      });
+      const saved = normalizeFornitore(await resp.json());
+      if (saved.id != null) {
+        let fornitori = getLocalFornitori().filter(f => f.id != saved.id);
+        fornitori.push(saved);
+        syncLocalStorage(fornitori);
+      }
+
+      const tr = document.createElement("tr");
+      tr.dataset.id = saved.id ?? "";
+      tr.innerHTML = `
+        <td>${saved.nomeFornitore}</td>
+        <td>${saved.nomeAgente}</td>
+        <td>${saved.categoria}</td>
+        <td>${saved.telAgente}</td>
+        <td>${saved.telAzienda}</td>
+        <td>${saved.indirizzo}</td>
+        <td>${saved.iban_beneficiario}</td>
+        <td>${saved.bic_beneficiario}</td>
+        <td>${saved.note}</td>
+        <td class="text-center">
+          <button class="btn btn-sm btn-outline-primary me-1 editBtn"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-sm btn-outline-success me-1 saveBtn" style="display:none;"><i class="bi bi-save"></i></button>
+          <button class="btn btn-sm btn-outline-danger deleteBtn"><i class="bi bi-trash"></i></button>
+        </td>`;
+      tbody.prepend(tr);
+
+      form.reset();
+      showToast("➕ Fornitore aggiunto!");
+    } catch (err) {
+      console.error("Errore salvataggio fornitore", err);
+    }
+  });
+});
+</script>
+{% endblock %}

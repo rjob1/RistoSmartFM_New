@@ -1,0 +1,310 @@
+﻿{% extends "base.html" %}
+{% block title %}Situazione Annuale{% endblock %}
+
+{% block content %}
+
+<div class="container-fluid mt-4 px-4 annuale-container" data-initial-year="{{ anno }}">
+
+  <h2 class="mb-3">Situazione Annuale</h2>
+
+  <!-- 🔔 Notifiche -->
+  <div id="notifiche" class="alert alert-info d-none mb-3"></div>
+
+  <!-- Pulsanti mesi -->
+  <div class="d-flex flex-wrap justify-content-center mb-4 month-strip">
+    {% for mese in [
+      "Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno",
+      "Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"
+    ] %}
+      <button type="button" class="btn btn-outline-primary m-1" data-mese="{{ mese|lower }}" data-index="{{ loop.index0 }}">{{ mese }}</button>
+    {% endfor %}
+  </div>
+
+  <!-- Totali annuali -->
+  <div class="row text-center mb-4">
+    <div class="col-md-3">
+      <div class="card shadow-sm p-3">
+        <strong>Incasso annuale</strong>
+        <div id="tot-incasso">0,00</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card shadow-sm p-3">
+        <strong>Spese annuali</strong>
+        <div id="tot-spese">0,00</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card shadow-sm p-3">
+        <strong>Ricavo annuale</strong>
+        <div id="tot-ricavo">0,00</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card shadow-sm p-3">
+        <strong>Incidenza % annuale</strong>
+        <div id="tot-incidenza">0,00%</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tabella riepilogo mesi -->
+  <div class="table-responsive mb-4">
+    <table class="table table-striped table-hover text-center align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>Mese</th>
+          <th>Incassi mensili</th>
+          <th>Spese mensili</th>
+          <th>Ricavo mensile</th>
+          <th>Incidenza %</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for mese in [
+          "Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno",
+          "Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"
+        ] %}
+        <tr>
+          <td>{{ mese }}</td>
+          <td id="incasso-{{ loop.index0 }}">0,00</td>
+          <td id="spese-{{ loop.index0 }}">0,00</td>
+          <td id="ricavo-{{ loop.index0 }}">0,00</td>
+          <td id="incidenza-{{ loop.index0 }}">--</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Selezione anno -->
+  <div class="d-flex justify-content-center mb-4">
+    <div class="card p-3 shadow-sm">
+      <label for="selectAnno" class="form-label fw-bold">Scegli l'anno</label>
+      <select id="selectAnno" class="form-select">
+        {% for y in anni_disponibili %}
+          <option value="{{ y }}" {% if y == anno %}selected{% endif %}>{{ y }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <!-- Grafico annuale -->
+  <div class="card shadow-sm p-4">
+    <canvas id="chartAnnuale" height="100"></canvas>
+  </div>
+
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const container = document.querySelector(".annuale-container");
+  const initialYear = (container && container.dataset ? container.dataset.initialYear : "") || "";
+  const monthLabelsFull = [
+    "Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno",
+    "Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"
+  ];
+  const monthButtons = Array.from(document.querySelectorAll(".month-strip button[data-mese]"));
+  const annoSelect = document.getElementById("selectAnno");
+  const notifiche = document.getElementById("notifiche");
+  const canvas = document.getElementById("chartAnnuale");
+  const ctx = canvas ? canvas.getContext("2d") : null;
+
+  if (!ctx || !annoSelect) {
+    console.error("Componenti essenziali mancanti nella pagina annuale");
+    return;
+  }
+
+  const chart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: monthLabelsFull.map(label => label.slice(0, 3)),
+      datasets: [
+        {
+          label: "Incasso",
+          data: Array(12).fill(0),
+          backgroundColor: "#0d6efd",
+          borderColor: "#0c5ed7",
+          borderWidth: 1,
+          borderRadius: 4,
+          maxBarThickness: 32
+        },
+        {
+          label: "Spese",
+          data: Array(12).fill(0),
+          backgroundColor: "#dc3545",
+          borderColor: "#bb2d3b",
+          borderWidth: 1,
+          borderRadius: 4,
+          maxBarThickness: 32
+        },
+        {
+          label: "Ricavo",
+          data: Array(12).fill(0),
+          backgroundColor: "#facc15",
+          borderColor: "#eab308",
+          borderWidth: 1,
+          borderRadius: 4,
+          maxBarThickness: 32
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: "bottom" },
+        tooltip: {
+          callbacks: {
+            label(context) {
+              const value = (context.parsed && typeof context.parsed.y === "number") ? context.parsed.y : 0;
+              return `${context.dataset.label}: € ${formatEuro(value)}`;
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            callback: value => `€ ${formatEuro(value)}`
+          }
+        }
+      }
+    }
+  });
+
+  function formatEuro(value) {
+    const num = Number(value) || 0;
+    return num.toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function formatPercent(value) {
+    const num = Number(value) || 0;
+    return `${num.toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+  }
+
+  function updateCell(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  }
+
+  function resetTable() {
+    for (let i = 0; i < 12; i += 1) {
+      updateCell(`incasso-${i}`, "0,00");
+      updateCell(`spese-${i}`, "0,00");
+      updateCell(`ricavo-${i}`, "0,00");
+      updateCell(`incidenza-${i}`, "--");
+    }
+    updateCell("tot-incasso", "0,00");
+    updateCell("tot-spese", "0,00");
+    updateCell("tot-ricavo", "0,00");
+    updateCell("tot-incidenza", "0,00%");
+    chart.data.datasets.forEach(dataset => dataset.data.fill(0));
+    chart.update();
+  }
+
+  function showNotification(message, variant = "info") {
+    if (!notifiche) return;
+    notifiche.textContent = message;
+    notifiche.classList.remove("d-none", "alert-info", "alert-danger", "alert-success", "alert-warning");
+    notifiche.classList.add(`alert-${variant}`);
+  }
+
+  function clearNotification() {
+    if (!notifiche) return;
+    notifiche.textContent = "";
+    notifiche.classList.add("d-none");
+    notifiche.classList.remove("alert-info", "alert-danger", "alert-success", "alert-warning");
+  }
+
+  async function caricaDati(anno) {
+    clearNotification();
+    try {
+      const response = await fetch(`/api/annuale/${anno}`);
+      if (!response.ok) throw new Error(`Richiesta fallita (${response.status})`);
+      const payload = await response.json();
+
+      const dati = Array.isArray(payload.dati) ? payload.dati : [];
+      if (dati.length !== 12) {
+        console.warn("Dati annuali incompleti", dati);
+        resetTable();
+        showNotification("Dati annuali incompleti ricevuti dall'API.", "warning");
+        return;
+      }
+
+      let totInc = 0;
+      let totSpe = 0;
+      let totRic = 0;
+
+      dati.forEach((row, idx) => {
+        const inc = Number(row.incassi) || 0;
+        const spe = Number(row.spese) || 0;
+        const ric = Number(row.ricavo);
+        const ricavo = Number.isFinite(ric) ? ric : inc - spe;
+        const incidenza = inc ? (ricavo / inc) * 100 : 0;
+
+        updateCell(`incasso-${idx}`, formatEuro(inc));
+        updateCell(`spese-${idx}`, formatEuro(spe));
+        updateCell(`ricavo-${idx}`, formatEuro(ricavo));
+        updateCell(`incidenza-${idx}`, inc ? formatPercent((typeof row.incidenza === "number" ? row.incidenza : incidenza)) : "--");
+
+        chart.data.datasets[0].data[idx] = Math.round(inc * 100) / 100;
+        chart.data.datasets[1].data[idx] = Math.round(spe * 100) / 100;
+        chart.data.datasets[2].data[idx] = Math.round(ricavo * 100) / 100;
+
+        totInc += inc;
+        totSpe += spe;
+        totRic += ricavo;
+      });
+
+      const totali = payload.totali || {
+        incassi: totInc,
+        spese: totSpe,
+        ricavo: totRic,
+        incidenza: totInc ? (totRic / totInc) * 100 : 0
+      };
+
+      updateCell("tot-incasso", formatEuro(totali.incassi));
+      updateCell("tot-spese", formatEuro(totali.spese));
+      updateCell("tot-ricavo", formatEuro(totali.ricavo));
+      updateCell("tot-incidenza", formatPercent(totali.incidenza));
+
+      chart.update();
+    } catch (error) {
+      console.error("Errore caricamento dati annuali:", error);
+      resetTable();
+      showNotification("Impossibile caricare la situazione annuale. Riprova più tardi.", "danger");
+    }
+  }
+
+  monthButtons.forEach(btn => {
+    btn.addEventListener("click", () => {
+      const anno = annoSelect.value;
+      const meseSlug = btn.dataset.mese;
+      if (!meseSlug) return;
+      window.location.href = `/mese/${anno}/${meseSlug}`;
+    });
+  });
+
+  const startYear = (annoSelect.value || initialYear || new Date().getFullYear()).toString();
+  annoSelect.value = startYear;
+
+  annoSelect.addEventListener("change", () => {
+    caricaDati(annoSelect.value);
+  });
+
+  caricaDati(startYear);
+});
+
+</script>
+{% endblock %}
+
+
+
+
+

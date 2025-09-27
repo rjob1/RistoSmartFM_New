@@ -1,0 +1,795 @@
+{% extends "base.html" %}
+{% block title %}Dettaglio Stipendi Personale{% endblock %}
+{% block content %}
+
+<style>
+  .stipendi-wrapper{max-width:100vw;padding-left:12px;padding-right:12px}
+  /* celle mese compatte e responsive */
+  .month-cell{min-width:120px}
+  @media (max-width:992px){.month-cell{min-width:140px}}
+  @media (max-width:576px){.month-cell{min-width:160px}}
+
+  /* popup QR centrato e sopra tutto */
+  .stipendi-qr-overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.65);z-index:2000}
+  .stipendi-qr-overlay.show{display:flex}
+  .stipendi-qr-card{
+    background:#fff;border-radius:14px;padding:22px;
+    max-width:520px;                /* limite fisso */
+    width:min(92vw,520px);          /* responsive */
+    box-shadow:0 12px 38px rgba(0,0,0,.25);
+    text-align:center;
+    overflow:auto;                  /* evita che l'immagine esca */
+  }
+
+  .stipendi-qr-card img{
+    display:block;
+    max-width:100%;
+    width:100%;
+    height:auto;
+    margin:0 auto 1rem;
+    object-fit:contain;
+  }
+
+  /* verde PAGATO più acceso e persistente */
+  .paid-input{background:#bbf7d0!important;color:#14532d!important;font-weight:600;border-color:#16a34a!important}
+  .btn-paid{background:#14502a!important;border-color:#14502a a!important;color:#fff!important}
+
+  /* toast "Bonifico registrato" */
+  .stipendi-toast{
+    position:fixed; top:1.1rem; right:1.2rem;
+    background:#198754; color:#fff;
+    padding:.75rem 1.1rem; border-radius:8px;
+    box-shadow:0 4px 12px rgba(25,135,84,.35);
+    opacity:0; pointer-events:none; transition:opacity .3s ease;
+    z-index:2100; font-weight:600
+  }
+  .stipendi-toast.show{ opacity:1 }
+</style>
+
+
+<div class="container-fluid my-4 stipendi-wrapper">
+  <h2 class="mb-4 text-center" style="color:#336699;">Dettaglio Stipendi Personale</h2>
+
+<div class="d-flex justify-content-end mb-3">
+  <button id="btn-reset-stipendi" class="btn btn-outline-danger btn-sm">
+    Svuota stipendi (utente corrente)
+  </button>
+</div>
+
+  <div class="block-note mb-3">
+    <strong>Come usare la schermata:</strong> inserisci il lordo e il netto per ogni mese.  
+    I contributi vengono calcolati automaticamente e il totale annuale si aggiorna.  
+  </div>
+
+  <div id="messaggioVuoto" class="alert alert-info d-none">
+    Nessun dipendente presente. Aggiungili dalla pagina <a href="{{ url_for('gestione_personale') }}">Gestione personale</a>.
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-bordered table-striped" id="stipendiTable">
+      <thead class="table-primary">
+        <tr>
+          <th>Nome dipendente</th>
+          <th>Categoria</th>
+          {% set mesi_full = ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"] %}
+          {% for mese in mesi_full %}
+            <th class="month-cell">{{ mese }}</th>
+          {% endfor %}
+          <th class="month-cell">Totale annuale</th>
+        </tr>
+      </thead>
+      <tbody id="stipendi-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="stipendi-qr-overlay" class="stipendi-qr-overlay">
+  <div class="stipendi-qr-card">
+    <div class="d-flex justify-content-end">
+      <button type="button" class="btn btn-sm btn-outline-secondary" data-qr-close><i class="bi bi-x"></i></button>
+    </div>
+    <img src="" alt="QR Code" data-qr-img>
+    <div class="details">
+      <p class="mb-1"><strong>Periodo di liquidazione:</strong> <span data-qr-periodo></span></p>
+      <p class="mb-1"><strong>Beneficiario:</strong> <span data-qr-nome></span></p>
+      <p class="mb-1"><strong>Categoria:</strong> <span data-qr-categoria></span></p>
+      <p class="mb-0"><strong>Importo netto:</strong> <span data-qr-importo></span></p>
+      <p class="mb-0"><strong>IBAN:</strong> <span data-qr-iban class="font-monospace"></span></p>
+    </div>
+    <div class="d-flex gap-2 justify-content-end">
+      <button type="button" class="btn btn-outline-secondary" data-qr-close>Chiudi</button>
+      <button type="button" class="btn btn-success" data-qr-confirm>Conferma pagamento</button>
+    </div>
+  </div>
+</div>
+
+<div id="stipendi-toast" class="stipendi-toast">Bonifico registrato</div>
+
+<!-- Modal conferma reset stipendi -->
+<div class="modal fade" id="resetConfirmModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content border-danger">
+      <div class="modal-header">
+        <h5 class="modal-title text-danger">Conferma eliminazione stipendi</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Chiudi"></button>
+      </div>
+      <div class="modal-body">
+        Sei sicuro di voler eliminare <strong>tutti</strong> gli stipendi dell’utente corrente? L’operazione è irreversibile.
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">No</button>
+        <button type="button" class="btn btn-danger" id="confirm-reset">Sì, elimina</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="resetConfirmModal2" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content border-danger">
+      <div class="modal-header">
+        <h5 class="modal-title text-danger">Conferma finale</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Chiudi"></button>
+      </div>
+      <div class="modal-body">
+        Ultimo avviso: eliminare <strong>tutti</strong> gli stipendi? L’azione non è reversibile.
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">No</button>
+        <button type="button" class="btn btn-danger" id="confirm-reset-final">Sì, elimina definitivamente</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+{% block scripts %}
+
+<script>
+/* --- CSRF helper + fetch wrapper --- */
+(function () {
+  if (window.csrfFetch) return;
+
+  function getCookie(name) {
+    const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+    return m ? decodeURIComponent(m.pop()) : '';
+  }
+  function getCsrfToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    if (meta?.content) return meta.content;
+    const inp = document.querySelector('input[name="csrf_token"], #csrf_token');
+    if (inp?.value) return inp.value;
+    return getCookie('csrf_token') || '';
+  }
+
+  window.csrfFetch = async function (url, opts = {}) {
+    const token = getCsrfToken();
+    const headers = new Headers(opts.headers || {});
+    if (!headers.has('X-CSRFToken') && token) headers.set('X-CSRFToken', token);
+    if (!headers.has('X-Requested-With')) headers.set('X-Requested-With', 'XMLHttpRequest');
+    if (!headers.has('Accept')) headers.set('Accept', 'application/json');
+
+    const res = await fetch(url, { credentials: 'same-origin', ...opts, headers });
+    if (res.status === 401) { window.location.href = '/login'; return res; }
+    if (res.status === 403) { window.location.href = '/license'; return res; }
+    return res;
+  };
+})();
+</script>
+
+<script>
+const STORAGE_KEY = 'STIPENDI_DETTAGLIO';
+const AGG_KEY = 'STIPENDI_AGGREGATO';
+const UPDATE_KEY = 'stipendi_update_trigger';
+const AVAILABLE_MONTHS = [
+  { slug: 'gennaio', short: 'Gen', full: 'Gennaio' },
+  { slug: 'febbraio', short: 'Feb', full: 'Febbraio' },
+  { slug: 'marzo', short: 'Mar', full: 'Marzo' },
+  { slug: 'aprile', short: 'Apr', full: 'Aprile' },
+  { slug: 'maggio', short: 'Mag', full: 'Maggio' },
+  { slug: 'giugno', short: 'Giu', full: 'Giugno' },
+  { slug: 'luglio', short: 'Lug', full: 'Luglio' },
+  { slug: 'agosto', short: 'Ago', full: 'Agosto' },
+  { slug: 'settembre', short: 'Set', full: 'Settembre' },
+  { slug: 'ottobre', short: 'Ott', full: 'Ottobre' },
+  { slug: 'novembre', short: 'Nov', full: 'Novembre' },
+  { slug: 'dicembre', short: 'Dic', full: 'Dicembre' }
+];
+const MAPPA_ID = {
+  'Amministrazione': 'amministrazione',
+  'Staff Cucina': 'staff-cucina',
+  'Staff Sala': 'staff-sala',
+  'Staff Lavapiatti': 'staff-lavapiatti',
+  'Staff Pulizie': 'staff-pulizie',
+  'Altro': 'altro'
+};
+const SYNC_DELAY_MS = 600; // batch entro 600 ms per dipendente
+
+let stipendiData = {};
+let personale = [];
+let annoCorrente = {{ anno }};
+let overlayState = { empId: null, month: null, nome: '' };
+let readyForSync = false;
+const pendingSync = new Set();
+let syncTimer = null;
+
+const bodyEl = document.getElementById('stipendi-body');
+const msgVuoto = document.getElementById('messaggioVuoto');
+const toastEl = document.getElementById('stipendi-toast');
+const qrOverlay = document.getElementById('stipendi-qr-overlay');
+const qrImg = qrOverlay.querySelector('[data-qr-img]');
+const qrPeriodo = qrOverlay.querySelector('[data-qr-periodo]');
+const qrNome = qrOverlay.querySelector('[data-qr-nome]');
+const qrCategoria = qrOverlay.querySelector('[data-qr-categoria]');
+const qrImporto = qrOverlay.querySelector('[data-qr-importo]');
+const qrIban = qrOverlay.querySelector('[data-qr-iban]');
+const qrConfirmBtn = qrOverlay.querySelector('[data-qr-confirm]');
+const selectAnno = document.getElementById('selectAnno');
+
+// Modal Bootstrap per conferma reset (doppio step)
+const resetModalEl = document.getElementById('resetConfirmModal');
+const resetModal = resetModalEl ? new bootstrap.Modal(resetModalEl) : null;
+const resetModal2El = document.getElementById('resetConfirmModal2');
+const resetModal2 = resetModal2El ? new bootstrap.Modal(resetModal2El) : null;
+
+document.getElementById('btn-reset-stipendi')?.addEventListener('click', () => {
+  resetModal?.show();
+});
+
+document.getElementById('confirm-reset')?.addEventListener('click', () => {
+  resetModal?.hide();
+  setTimeout(() => resetModal2?.show(), 200); // mostra il 2° modal
+});
+
+document.getElementById('confirm-reset-final')?.addEventListener('click', async () => {
+  try { await csrfFetch('/api/stipendi', { method: 'DELETE' }); } catch(e) { console.warn(e); }
+  localStorage.removeItem('STIPENDI_DETTAGLIO');
+  localStorage.removeItem('STIPENDI_AGGREGATO');
+  localStorage.removeItem('stipendi_update_trigger');
+  resetModal2?.hide();
+  location.reload();
+});
+
+
+selectAnno?.addEventListener('change', (event) => {
+  const value = event.target.value;
+  if (value) {
+    window.location.href = `{{ url_for('stipendi') }}?anno=${value}`;
+  }
+});
+
+qrOverlay.querySelectorAll('[data-qr-close]').forEach((btn) => {
+  btn.addEventListener('click', hideQrModal);
+});
+
+qrOverlay.addEventListener('click', (event) => {
+  if (event.target === qrOverlay) hideQrModal();
+});
+
+qrConfirmBtn?.addEventListener('click', () => {
+  if (!overlayState.empId || !overlayState.month) {
+    hideQrModal();
+    return;
+  }
+  const { empId, month, nome } = overlayState;
+  hideQrModal();
+  markPagamento(empId, month, nome);
+});
+
+function parseValue(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
+  let str = String(value ?? '').trim();
+
+  // ✅ normalizza virgola → punto
+  str = str.replace(',', '.');
+
+  // ✅ rimuovi separatori di migliaia (punti o spazi) SOLO se non sono decimali
+  str = str.replace(/(\d)[\.\s](?=\d{3}\b)/g, '$1');
+
+  const parsed = parseFloat(str);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatEuro(val) {
+  return parseValue(val).toLocaleString('it-IT', { style: 'currency', currency: 'EUR' });
+}
+
+function formatInputValue(val) {
+  return parseValue(val).toFixed(2);
+}
+
+function displayOrEmpty(val) {
+  const n = parseValue(val);
+  return n === 0 ? '' : formatInputValue(n);
+}
+
+function normalizeMonth(raw = {}) {
+  const lordo = parseValue(raw.lordo);
+  const netto = parseValue(raw.netto);
+  const contributiCalcolati = Math.max(lordo - netto, 0);
+  const contributi = raw.contributi != null ? parseValue(raw.contributi) : contributiCalcolati;
+  const totale = parseValue(raw.totale) || lordo;
+  return {
+    lordo,
+    netto,
+    contributi: Math.max(contributi, 0),
+    totale: totale || lordo,
+    pagato: Boolean(raw.pagato)
+  };
+}
+
+function loadData() {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    stipendiData = stored ? JSON.parse(stored) : {};
+  } catch (err) {
+    console.warn('Impossibile leggere lo storage stipendi:', err);
+    stipendiData = {};
+  }
+}
+
+function saveData({ trigger = true, syncEmpIds = [] } = {}) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stipendiData));
+  } catch (err) {
+    console.warn('Impossibile salvare lo storage stipendi:', err);
+  }
+  syncAggregati(trigger);
+  if (!readyForSync) return;
+  const ids = Array.isArray(syncEmpIds) ? syncEmpIds : (syncEmpIds ? [syncEmpIds] : []);
+  ids.forEach((id) => scheduleSync(id));
+}
+
+function scheduleSync(empId) {
+  if (empId == null) return;
+  pendingSync.add(String(empId));
+  if (syncTimer) clearTimeout(syncTimer);
+  if (SYNC_DELAY_MS === 0) {
+    flushSync();                // push immediato al server
+  } else {
+    syncTimer = setTimeout(flushSync, SYNC_DELAY_MS);
+  }
+}
+
+async function flushSync() {
+  const yearKey = String(annoCorrente);
+  const ids = Array.from(pendingSync);
+  pendingSync.clear();
+  syncTimer = null;
+  for (const empId of ids) {
+    const record = stipendiData[yearKey]?.[empId];
+    if (!record) continue;
+    const payload = { anno: annoCorrente, mesi: {} };
+    AVAILABLE_MONTHS.forEach(({ slug }) => {
+      const mese = record.mesi?.[slug] || { lordo: 0, netto: 0, contributi: 0, totale: 0, pagato: false };
+      payload.mesi[slug] = {
+        lordo: parseValue(mese.lordo),
+        netto: parseValue(mese.netto),
+        contributi: parseValue(mese.contributi),
+        totale: parseValue(mese.totale),
+        pagato: Boolean(mese.pagato)
+      };
+    });
+    try {
+      const res = await csrfFetch(`/api/stipendi/${empId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        console.warn('Sync stipendi fallita per', empId, text);
+      }
+    } catch (err) {
+      console.warn('Sync stipendi fallita per', empId, err);
+    }
+  }
+}
+
+function ensureRecord(persona) {
+  const yearKey = String(annoCorrente);
+  if (!stipendiData[yearKey]) stipendiData[yearKey] = {};
+  const key = String(persona.id);
+  let record = stipendiData[yearKey][key];
+  if (!record) {
+    record = { id: persona.id, nome: persona.nome, ruolo: persona.ruolo, mesi: {} };
+  }
+  record.nome = persona.nome;
+  record.ruolo = persona.ruolo;
+  const mesi = record.mesi || {};
+  AVAILABLE_MONTHS.forEach(({ slug }) => {
+    mesi[slug] = normalizeMonth(mesi[slug]);
+  });
+  record.mesi = mesi;
+  stipendiData[yearKey][key] = record;
+  return record;
+}
+
+function updateMonthComputed(record, monthSlug) {
+  if (!record.mesi[monthSlug]) record.mesi[monthSlug] = normalizeMonth();
+  const mese = record.mesi[monthSlug];
+  mese.contributi = Math.max(parseValue(mese.lordo) - parseValue(mese.netto), 0);
+  mese.totale = parseValue(mese.lordo);
+}
+
+function updateMonthInputs(empId, monthSlug) {
+  const yearKey = String(annoCorrente);
+  const record = stipendiData[yearKey]?.[empId];
+  if (!record) return;
+  const mese = record.mesi?.[monthSlug];
+  if (!mese) return;
+  const selectors = [
+    { field: 'lordo', value: mese.lordo },
+    { field: 'contributi', value: mese.contributi },
+    { field: 'netto', value: mese.netto }
+  ];
+  selectors.forEach(({ field, value }) => {
+    const input = document.querySelector(`input[data-field="${field}"][data-emp="${empId}"][data-month="${monthSlug}"]`);
+    if (input && document.activeElement !== input) {
+      const n = parseValue(value);
+      input.value = n === 0 ? '' : formatInputValue(n);
+    }
+  });
+}
+
+function pruneRecords(personaleList) {
+  const yearKey = String(annoCorrente);
+  if (!stipendiData[yearKey]) return;
+  const validIds = new Set(personaleList.map((p) => String(p.id)));
+  Object.keys(stipendiData[yearKey]).forEach((id) => {
+    if (!validIds.has(String(id))) {
+      delete stipendiData[yearKey][id];
+    }
+  });
+}
+
+function aggiornaTotalePerDipendente(empId) {
+  const yearKey = String(annoCorrente);
+  const record = stipendiData[yearKey]?.[String(empId)];
+  if (!record) return;
+  const totals = { netto: 0, contributi: 0, totale: 0 };
+  AVAILABLE_MONTHS.forEach(({ slug }) => {
+    const mese = record.mesi[slug];
+    if (!mese) return;
+    totals.netto += parseValue(mese.netto);
+    totals.contributi += parseValue(mese.contributi);
+    totals.totale += parseValue(mese.totale);
+  });
+  const nettoEl = document.querySelector(`[data-total-netto="${empId}"]`);
+  const contrEl = document.querySelector(`[data-total-contributi="${empId}"]`);
+  const lordoEl = document.querySelector(`[data-total-lordo="${empId}"]`);
+  if (nettoEl) nettoEl.textContent = formatEuro(totals.netto);
+  if (contrEl) contrEl.textContent = formatEuro(totals.contributi);
+  if (lordoEl) lordoEl.textContent = formatEuro(totals.totale);
+}
+
+function aggiornaStatoPagamentoUI(empId, monthSlug, pagato) {
+  const button = document.querySelector(`button[data-pay="${empId}"][data-month="${monthSlug}"]`);
+  if (button) {
+    button.textContent = pagato ? 'Pagato' : 'Paga';
+    button.classList.toggle('btn-outline-primary', !pagato);
+    button.classList.toggle('btn-paid', pagato); // verde acceso
+    button.disabled = pagato;
+  }
+  document.querySelectorAll(`input[data-emp="${empId}"][data-month="${monthSlug}"]`)
+    .forEach(inp => {
+      inp.readOnly = pagato;
+      inp.classList.toggle('paid-input', pagato); // input verdi persistenti
+    });
+}
+
+function render(personaleList) {
+  const bodyEl = document.getElementById('stipendi-body');
+  bodyEl.innerHTML = '';
+  if (!personaleList.length) {
+    document.getElementById('messaggioVuoto').classList.remove('d-none');
+    return;
+  }
+  document.getElementById('messaggioVuoto').classList.add('d-none');
+
+  personaleList.forEach((persona) => {
+    const record = ensureRecord(persona);
+    const tr = document.createElement('tr');
+
+    const nomeTd = document.createElement('td');
+    nomeTd.textContent = record.nome;
+    tr.appendChild(nomeTd);
+
+    const catTd = document.createElement('td');
+    catTd.textContent = record.ruolo;
+    tr.appendChild(catTd);
+
+    AVAILABLE_MONTHS.forEach(({ slug }) => {
+      const meseData = record.mesi[slug];
+      const pagato = Boolean(meseData?.pagato);
+      const lordoValue       = displayOrEmpty(meseData?.lordo);
+      const contributiValue  = displayOrEmpty(meseData?.contributi);
+      const nettoValue       = displayOrEmpty(meseData?.netto);
+
+      const cell = document.createElement('td');
+      cell.classList.add('month-cell');
+      cell.innerHTML = `
+        <div class="d-grid gap-1">
+          <input type="number"
+                class="form-control form-control-sm stipendio-input ${pagato ? 'paid-input' : ''}"
+                data-field="lordo" data-month="${slug}" data-emp="${record.id}"
+                value="${lordoValue}" placeholder="Lordo" ${pagato ? 'readonly' : ''}>
+          <input type="text" readonly
+                class="form-control form-control-sm stipendio-input bg-light ${pagato ? 'paid-input' : ''}"
+                data-field="contributi" data-month="${slug}" data-emp="${record.id}"
+                value="${contributiValue}" placeholder="Contributi">
+          <input type="number"
+                class="form-control form-control-sm stipendio-input ${pagato ? 'paid-input' : ''}"
+                data-field="netto" data-month="${slug}" data-emp="${record.id}"
+                value="${nettoValue}" placeholder="Netto" ${pagato ? 'readonly' : ''}>
+          <button type="button"
+                  class="btn btn-sm ${pagato ? 'btn-paid' : 'btn-outline-primary'} w-100"
+                  data-pay="${record.id}" data-month="${slug}" ${pagato ? 'disabled' : ''}>
+            ${pagato ? 'Pagato' : 'Paga'}
+          </button>
+        </div>`;
+      tr.appendChild(cell);
+      aggiornaStatoPagamentoUI(record.id, slug, pagato);
+    });
+
+    const totalTd = document.createElement('td');
+    totalTd.innerHTML = `
+      <span><small>Netto</small> <span data-total-netto="${record.id}">0,00 €</span></span><br>
+      <span><small>Contributi</small> <span data-total-contributi="${record.id}">0,00 €</span></span><br>
+      <span><small>Lordo</small> <span data-total-lordo="${record.id}">0,00 €</span></span>`;
+    tr.appendChild(totalTd);
+
+    bodyEl.appendChild(tr);
+    aggiornaTotalePerDipendente(record.id);
+  });
+}
+
+function syncAggregati(trigger = true) {
+  const yearKey = String(annoCorrente);
+  const yearData = stipendiData[yearKey] || {};
+  const aggregato = JSON.parse(localStorage.getItem(AGG_KEY) || '{}');
+  const risultato = {};
+  AVAILABLE_MONTHS.forEach(({ slug }) => {
+    risultato[slug] = { amministrazione: 0, 'staff-cucina': 0, 'staff-sala': 0, 'staff-lavapiatti': 0, 'staff-pulizie': 0, altro: 0 };
+  });
+  Object.values(yearData).forEach((record) => {
+    const catKey = MAPPA_ID[record.ruolo] || 'altro';
+    AVAILABLE_MONTHS.forEach(({ slug }) => {
+      const mese = record.mesi?.[slug];
+      if (!mese) return;
+      risultato[slug][catKey] += parseValue(mese.totale);
+    });
+  });
+  aggregato[yearKey] = risultato;
+  try {
+    localStorage.setItem(AGG_KEY, JSON.stringify(aggregato));
+  } catch (err) {
+    console.warn('Impossibile aggiornare aggregato stipendi:', err);
+  }
+  if (trigger) {
+    localStorage.setItem(UPDATE_KEY, Date.now().toString());
+  }
+}
+
+function showLocalToast(message) {
+  if (!toastEl) return;
+  toastEl.textContent = message;
+  toastEl.classList.add('show');
+  setTimeout(() => toastEl.classList.remove('show'), 2500);
+}
+
+function hideQrModal() {
+  qrOverlay.classList.remove('show');
+  overlayState = { empId: null, month: null, nome: '' };
+  document.body.style.overflow = '';
+}
+
+function formatIbanReadable(iban) {
+  return iban.replace(/(.{4})/g, '$1 ').trim();
+}
+
+async function handlePagamento(empId, monthSlug) {
+  const yearKey = String(annoCorrente);
+  const record = stipendiData[yearKey]?.[empId];
+  if (!record) return;
+  const persona = personale.find((p) => String(p.id) === String(empId));
+  if (!persona) {
+    alert('Dipendente non trovato. Aggiorna la pagina.');
+    return;
+  }
+  const meseInfo = record.mesi[monthSlug];
+  if (!meseInfo) return;
+  const netto = parseValue(meseInfo.netto);
+  if (netto <= 0) {
+    alert('Inserisci un importo netto maggiore di zero prima di procedere al pagamento.');
+    return;
+  }
+  const iban = (persona.iban || '').trim();
+  if (!iban) {
+    alert('IBAN assente. Aggiorna la scheda del dipendente nella pagina personale.');
+    return;
+  }
+  try {
+    const res = await csrfFetch(`/api/stipendi/${empId}/qr`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mese: monthSlug, anno: annoCorrente, netto })
+    });
+    const payload = await res.json();
+    if (!res.ok) {
+      throw new Error(payload.error || 'Errore generazione QR');
+    }
+    qrImg.src = payload.qr_image;
+    qrPeriodo.textContent = payload.periodo;
+    qrNome.textContent = payload.nome;
+    qrCategoria.textContent = payload.categoria || persona.ruolo;
+    qrImporto.textContent = formatEuro(payload.netto);
+    qrIban.textContent = formatIbanReadable(payload.iban || iban);
+    overlayState = { empId, month: monthSlug, nome: payload.nome };
+    qrOverlay.classList.add('show');
+    document.body.style.overflow = 'hidden';
+  } catch (err) {
+    console.warn(err);
+    alert(err.message || 'Impossibile generare il QR.');
+  }
+}
+
+function markPagamento(empId, monthSlug, nome) {
+  const yearKey = String(annoCorrente);
+  const record = stipendiData[yearKey]?.[empId];
+  if (!record) return;
+
+  // Forza creazione mese
+  if (!record.mesi[monthSlug]) record.mesi[monthSlug] = normalizeMonth();
+  record.mesi[monthSlug].pagato = true;
+
+  // Aggiorna UI e totali
+  aggiornaStatoPagamentoUI(empId, monthSlug, true);
+  aggiornaTotalePerDipendente(empId);
+  saveData({ trigger: true, syncEmpIds: empId });
+  
+  // ✅ blocca input + stile pagato persistente
+  document.querySelectorAll(`input[data-emp="${empId}"][data-month="${monthSlug}"]`)
+    .forEach(inp => { inp.readOnly = true; inp.classList.add('paid-input'); });
+
+  // ✅ Usa il nome dal record se non passato
+  const displayName = nome || record.nome || "Dipendente";
+  alert(`✅ Bonifico a ${displayName} effettuato con successo`);
+  showLocalToast(`Bonifico a ${displayName} registrato`);
+}
+
+bodyEl.addEventListener('input', (event) => {
+  const input = event.target;
+  if (!input.classList.contains('stipendio-input')) return;
+  if (input.readOnly) return;
+  const empId = input.dataset.emp;
+  const field = input.dataset.field;
+  if (field !== 'lordo' && field !== 'netto') return;
+  const month = input.dataset.month;
+  const value = parseValue(input.value);
+  const yearKey = String(annoCorrente);
+  const record = stipendiData[yearKey]?.[empId];
+  if (!record) return;
+  if (!record.mesi[month]) record.mesi[month] = normalizeMonth();
+  record.mesi[month][field] = value;
+  updateMonthComputed(record, month);
+  updateMonthInputs(empId, month);
+  if (record.mesi[month].pagato) {
+    record.mesi[month].pagato = false;
+    aggiornaStatoPagamentoUI(empId, month, false);
+  }
+  aggiornaTotalePerDipendente(empId);
+  saveData({ trigger: true, syncEmpIds: empId });
+});
+
+bodyEl.addEventListener('blur', (event) => {
+  const input = event.target;
+  if (!input.classList.contains('stipendio-input')) return;
+  const empId = input.dataset.emp;
+  const month = input.dataset.month;
+  updateMonthInputs(empId, month);
+}, true);
+
+bodyEl.addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-pay]');
+  if (!button) return;
+  if (button.disabled) return;
+  const empId = button.dataset.pay;
+  const month = button.dataset.month;
+  handlePagamento(empId, month);
+});
+
+window.addEventListener('storage', (event) => {
+  if (event.key === STORAGE_KEY) {
+    loadData();
+    pruneRecords(personale);
+    render(personale);
+  }
+});
+
+async function fetchPersonale() {
+  try {
+    const res = await fetch('/api/personale');
+    if (!res.ok) throw new Error('API /api/personale');
+    const data = await res.json();
+    // 🔑 prendiamo anche lordo, netto e contributi
+    return (data.personale || []).map((d) => ({
+      id: d.id,
+      nome: d.nome,
+      ruolo: d.ruolo || d.categoria || 'Altro',
+      iban: d.iban || '',
+      lordo: parseFloat(d.lordo) || 0,
+      netto: parseFloat(d.netto) || 0,
+      contributi: parseFloat(d.contributi) || Math.max((parseFloat(d.lordo) || 0) - (parseFloat(d.netto) || 0), 0)
+    }));
+  } catch (err) {
+    console.warn('Impossibile caricare l\'elenco del personale:', err);
+    return [];
+  }
+}
+
+async function fetchStipendiServer() {
+  try {
+    const res = await csrfFetch(`/api/stipendi/dettaglio/${annoCorrente}`);
+    if (!res.ok) throw new Error('API /api/stipendi/dettaglio');
+    const data = await res.json();
+    return data.stipendi || {};
+  } catch (err) {
+    console.warn('Impossibile caricare i dati stipendi dal server:', err);
+    return {};
+  }
+}
+
+async function init() {
+  loadData();
+  personale = await fetchPersonale();
+  const serverData = await fetchStipendiServer(); // /api/stipendi/dettaglio/<anno>
+  const yearKey = String(annoCorrente);
+
+  stipendiData[yearKey] = stipendiData[yearKey] || {};
+
+  // ✅ usa rec.mesi, non l'oggetto intero
+  Object.entries(serverData).forEach(([empId, rec]) => {
+    const existing = stipendiData[yearKey][empId] || {
+      id: parseInt(empId, 10),
+      nome: rec.nome || "",
+      ruolo: rec.ruolo || "",
+      mesi: {}
+    };
+
+    // sincronizza anagrafica
+    existing.nome = rec.nome || existing.nome || "";
+    existing.ruolo = rec.ruolo || existing.ruolo || "";
+
+    // carica i mesi corretti
+    const mesiServer = rec.mesi || {};
+    Object.entries(mesiServer).forEach(([slug, values]) => {
+      existing.mesi[slug] = normalizeMonth(values);
+    });
+
+    // assicura tutti i mesi presenti anche se mancanti sul server
+    AVAILABLE_MONTHS.forEach(({ slug }) => {
+      existing.mesi[slug] = normalizeMonth(existing.mesi[slug]);
+    });
+
+    stipendiData[yearKey][empId] = existing;
+  });
+
+  pruneRecords(personale);
+  render(personale);
+  readyForSync = true;
+  saveData({ trigger: false });
+}
+
+init();
+
+
+
+</script>
+
+{% endblock %}
+
+
+

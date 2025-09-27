@@ -1,0 +1,905 @@
+{% extends "base.html" %}
+
+{% block title %}RistoSmartFM / Admin Licenze{% endblock %}
+
+{% block content %}
+<style>
+  /* Admin Licenze: larghezza estesa solo su desktop grandi (no impatto su mobile) */
+  @media (min-width: 1400px) {
+    .admin-wide { max-width: 1600px; }
+  }
+</style>
+
+<style>
+  /* Admin Licenze – layout più largo su schermi grandi */
+  @media (min-width: 1400px) {
+    /* Più respiro dentro le card */
+    .admin-wide .card-body { padding: 2rem; }
+
+    /* BLOCCO 2: 4 campi per riga (25% ciascuno) */
+    #shipBlock .col-md-4 { flex: 0 0 auto; width: 25%; }
+  }
+</style>
+
+<style>
+  /* Header tabella fisso durante lo scroll (solo desktop largo) */
+  @media (min-width: 1400px) {
+    #tblArchivio thead th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #f8f9fa; /* stesso della table-light */
+    }
+  }
+</style>
+
+<style>
+  th[data-sort] { cursor: pointer; user-select: none; }
+  th[data-sort].asc::after  { content: " ▲"; font-size: .8em; }
+  th[data-sort].desc::after { content: " ▼"; font-size: .8em; }
+</style>
+
+<div class="container-xxl admin-wide py-4">
+
+<!-- CSRF per le chiamate fetch -->
+<script>
+  window.CSRF_TOKEN = {{ csrf_token|tojson }};
+</script>
+
+<!-- Toolbar azioni -->
+<div class="d-flex gap-2 align-items-center mb-3">
+  <a href="/admin/backup/db" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-hdd"></i> Backup DB (ZIP)
+  </a>
+  <a href="/admin/licenses/export.csv" class="btn btn-outline-primary btn-sm">
+    <i class="bi bi-filetype-csv"></i> Esporta licenze (CSV)
+  </a>
+</div>
+
+<!-- 🔒 BLOCCO 1 – CREAZIONE -->
+<div class="card border-primary mb-4">
+  <div class="card-body">
+    <h4 class="card-title text-primary mb-3">Genera Nuova Licenza</h4>    
+    <form method="post" action="{{ url_for('admin_licenses') }}" class="row g-3" autocomplete="off" id="createForm">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="col-md-4">
+        <label for="scadenza" class="form-label">Scadenza (opz.)</label>
+        <input type="date" class="form-control" id="scadenza" name="scadenza"
+               min="{{ (datetime.utcnow().date() + timedelta(days=1)).isoformat() }}"
+               max="2030-12-31" placeholder="YYYY-MM-DD" value="">
+        <div class="form-text">Opzionale: se imposti la scadenza, deve essere tra domani e il 31/12/2030.</div>
+      </div>
+      <div class="col-md-5">
+        <label for="intestatario" class="form-label">Intestatario</label>
+        <input type="text" class="form-control" id="intestatario" name="intestatario"
+               placeholder="Ragione sociale o nominativo">
+      </div>
+      <div class="col-md-3 d-flex align-items-end">
+        <button type="submit" class="btn btn-primary w-100">Crea / Registra Licenza</button>
+      </div>
+    </form>
+
+    {% if msg %}
+    <div class="alert alert-info mt-3 mb-0">{{ msg }}</div>
+    {% endif %}
+
+    {% if new_key %}
+    <div class="alert alert-success d-flex align-items-center justify-content-between mt-3" id="generatedAlert">
+      <div>
+        <strong>Codice generato:</strong>
+        <code class="ms-1" id="newKey">{{ new_key }}</code>
+      </div>
+      <div class="d-flex gap-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="btnCopyNew">Copia Licenza</button>
+        <button type="button" class="btn btn-success btn-sm" id="btnMoveToShip">Inserisci nella Spedizione</button>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>  <!-- ⬅️ CHIUSURA BLOCCO 1 -->
+
+  <!-- ✉️ BLOCCO 2 – SPEDIZIONE -->
+  <div class="card border-success mb-4" id="shipBlock">
+    <div class="card-body">
+      <h4 class="card-title text-success mb-3">Invia Licenza al Cliente</h4>
+
+      <form class="row g-3" onsubmit="return false;">
+        <div class="col-12 col-md-6 col-lg-3">
+          <label class="form-label" for="ship_license">Codice licenza</label>
+          <input type="text" class="form-control" id="ship_license"
+                placeholder="RSFM-XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false">
+        </div>
+
+        <div class="col-12 col-md-6 col-lg-3">
+          <label class="form-label" for="ship_intestatario">Intestatario</label>
+          <input type="text" class="form-control" id="ship_intestatario"
+                placeholder="Nome e cognome / Azienda" autocomplete="name">
+        </div>
+
+        <div class="col-12 col-md-6 col-lg-3">
+          <label class="form-label" for="ship_email">Email destinatario</label>
+          <input type="email" class="form-control" id="ship_email"
+                placeholder="cliente@esempio.it" autocomplete="email">
+          <div class="form-text">Basta email **oppure** WhatsApp.</div>
+        </div>
+
+        <div class="col-12 col-md-6 col-lg-3">
+          <label class="form-label" for="ship_wa">Numero WhatsApp</label>
+          <input type="tel" class="form-control" id="ship_wa"
+                placeholder="+39 3xx xxx xxxx" inputmode="tel" autocomplete="tel">
+        </div>
+
+        <div class="col-12 d-flex flex-wrap gap-2">
+          <button class="btn btn-secondary" id="btnShipEmail" type="button">Invia via Email</button>
+          <button class="btn btn-success" id="btnShipWa" type="button">Invia via WhatsApp</button>
+          <span id="shipStatus" class="ms-2 text-muted"></span>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 📁 BLOCCO 3 – ARCHIVIO -->
+  <div class="card">
+    <div class="card-body">
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <div class="d-flex align-items-baseline gap-3">
+          <h4 class="card-title mb-0">Ricovero Licenze Inviate</h4>
+          <span id="tblNote" class="text-muted small"></span>
+        </div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-outline-secondary btn-sm" id="btnResetFilters">Reset filtri</button>
+          <button class="btn btn-outline-primary btn-sm" id="btnExportCsv">Esporta CSV</button> 
+           <form method="POST"
+                action="{{ url_for('admin_licenses_cleanup') }}"
+                onsubmit="return confirm('Confermi la pulizia? Questa azione è IRREVERSIBILE. Consigliato fare prima un backup.');"
+                style="display:flex; gap:.5rem; align-items:center; margin:.5rem 0">
+
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+            <label style="font-weight:600">Ripulisci test:</label>
+
+            <select name="mode" required>
+              <option value="keep_email">Tieni SOLO questa email</option>
+              <option value="keep_key">Tieni SOLO questa license key</option>
+            </select>
+
+            <input type="text" name="value" placeholder="email o license key" required
+                  style="min-width: 280px;">
+
+            <label style="display:flex; align-items:center; gap:.25rem; font-size:.9rem;">
+              <input type="checkbox" name="only_active" value="1" checked>
+              Solo attive (per email)
+            </label>
+
+            <button type="submit" class="btn btn-danger">Ripulisci test</button>
+
+            <a class="btn btn-secondary" href="{{ url_for('admin_backup_db') }}">Backup DB</a>
+          </form>       
+        </div>
+      </div>
+
+      <!-- Filtri -->
+      <div class="row g-2 mb-3">
+        <div class="col-md-4 col-lg-3">
+          <input type="text" class="form-control" id="flt_intestatario" placeholder="Filtro intestatario...">
+        </div>
+        <div class="col-md-4 col-lg-3">
+          <input type="text" class="form-control" id="flt_email" placeholder="Filtro email...">
+        </div>
+        <div class="col-md-4 col-lg-3">
+          <input type="date" class="form-control" id="flt_data">
+        </div>
+        <div class="col-md-4 col-lg-3">
+          <select class="form-select" id="flt_stato">
+            <option value="">Stato: Tutto</option>
+            <option value="scadute">Scadute</option>
+            <option value="presto">In scadenza (≤15g)</option>
+            <option value="attive">Attive</option>
+          </select>
+        </div>
+        <div class="col-md-4 col-lg-3">
+          <select class="form-select" id="flt_canale">
+            <option value="">Canale: Tutto</option>
+            <option value="email">Email</option>
+            <option value="wa">WhatsApp</option>
+          </select>
+        </div>
+      </div>
+
+
+      <div class="table-responsive">
+        <table class="table table-sm align-middle" id="tblArchivio">
+          <thead class="table-light">
+            <tr>
+              <th>License Key</th>
+              <th>Intestatario</th>
+              <th>Email</th>
+              <th>WhatsApp</th>
+              <th data-sort="sent">Data invio</th>
+              <th>Canale</th>
+              <th data-sort="exp">Scadenza</th>
+              <th>Stato</th>
+              <th class="text-end">Azioni</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for l in licenze %}
+            <tr data-meta='{{ (l.meta or "")|e }}'
+                data-intestatario='{{ (l.intestatario or "")|e }}'
+                data-license='{{ l.license_key }}'>
+              <td><code>{{ l.license_key }}</code></td>
+              <td class="col-int">{{ l.intestatario or '' }}</td>
+              <td class="col-email">{{ l.email or '' }}</td>
+              <td class="col-wa"></td>
+              <td class="col-sent"></td>
+              <td class="col-chan"></td>
+              <td class="col-exp">{{ l.scadenza or '' }}</td>
+              <td class="col-state">
+                {% if l.attiva %}
+                  <span class="badge bg-success">Attiva</span>
+                {% else %}
+                  <span class="badge bg-secondary">Non attiva</span>
+                {% endif %}
+              </td>
+              <td class="text-end">
+                <div class="btn-group btn-group-sm">
+                  <a class="btn btn-success"
+                    href="{{ url_for('admin_renew_get', key=l.license_key) }}">
+                    Rinnova (admin)
+                  </a>
+                  <button class="btn btn-outline-secondary btn-copy" data-key="{{ l.license_key }}">Copia</button>
+                  <button class="btn btn-outline-primary btn-ship" data-key="{{ l.license_key }}">Spedisci</button> <!-- ⬅️ nuovo -->
+                  <button class="btn btn-outline-danger btn-revoke" data-id="{{ l.id }}" data-key="{{ l.license_key }}">Revoca</button>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>        
+      </div> <!-- /table-responsive -->
+    </div>
+  </div> <!-- /card archivio -->
+
+</div> <!-- /container -->
+
+<!-- JS in coda alla pagina -->
+<script>
+(function(){
+  const qs  = (sel, root=document) => root.querySelector(sel);
+  const qsa = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+  const notify = (m) => (window.showToast ? window.showToast(m) : alert(m));
+
+  // Endpoints (coerenti con le route Flask)
+  const SEND_EMAIL_URL = '/admin/licenses/send_email';
+  const MARK_SENT_URL  = '/admin/licenses/mark_sent';
+  const REVOKE_URL     = '/admin/licenses/revoke';
+
+  // --- BLOCCO 1: azioni su chiave generata
+  const newKeyEl = qs('#newKey');
+  const genAlert = qs('#generatedAlert');
+
+  qs('#btnCopyNew')?.addEventListener('click', async () => {
+    const key = newKeyEl?.textContent?.trim();
+    if (!key) return;
+    try { await navigator.clipboard.writeText(key); notify('Licenza copiata.'); } catch {}
+    genAlert?.remove();
+  });
+
+  qs('#btnMoveToShip')?.addEventListener('click', () => {
+    const key = newKeyEl?.textContent?.trim();
+    if (!key) return;
+
+    // copia licenza
+    const shipKey = qs('#ship_license');
+    if (shipKey) shipKey.value = key;
+
+    // copia intestatario dal blocco 1
+    const srcName = qs('#intestatario')?.value?.trim() || '';
+    const shipName = qs('#ship_intestatario');
+    if (srcName && shipName) shipName.value = srcName;
+
+    genAlert?.remove();
+    qs('#shipBlock')?.scrollIntoView({behavior:'smooth', block:'start'});
+    (qs('#ship_email') || qs('#ship_wa'))?.focus();
+  });
+
+  // --- BLOCCO 2: invio email/WA
+  function buildMessage(key, intestatario){
+    return [
+      "Ciao e grazie di avere acquistato la licenza,",
+      "",
+      `Chiave licenza RistoSmartFM: ${key}`,
+      intestatario ? `Intestatario: ${intestatario}` : "",
+      "",
+      `Istruzioni: accedi, vai su "Licenza" e incolla la chiave.`,
+      "",
+      "Siamo a tua disposizione per qualsiasi chiarimento in merito.",
+      "RistoSmartFM Ufficio tecnico"
+    ].filter(Boolean).join('\n');
+  }
+  function normWaForLink(raw){
+    let d = (raw || '').replace(/[^\d+]/g,'');
+    if (d.startsWith('+')) d = d.slice(1);
+    if (!d.startsWith('39') && /^\d+$/.test(d)) d = '39' + d;
+    return d;
+  }
+  function prettyPhone(raw){
+    let d = (raw || '').replace(/[^\d+]/g,'');
+    if (!d) return '';
+    if (!d.startsWith('+')) d = '+39' + d;
+    return d;
+  }
+
+  async function markSent(license_key, email, wa_phone, channel){
+    try{
+      const payload = { license_key };
+      if (email)    payload.email    = email;
+      if (wa_phone) payload.wa_phone = wa_phone;
+      if (channel)  payload.channel  = channel;   // passiamo il canale
+
+      const res = await fetch(MARK_SENT_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-CSRF-Token': window.CSRF_TOKEN
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const text = await res.text();
+      let js;
+      try { js = JSON.parse(text); }
+      catch { throw new Error('Risposta non-JSON (forse login scaduto/redirect). Ricarica la pagina e riprova.'); }
+
+      if (!res.ok || !js.ok) throw new Error(js.msg || 'Errore salvataggio');
+      // ritorna { ok, sent_at, channel }
+      return js;
+    }catch(e){
+      console.warn(e);
+      throw e;
+    }
+  }
+
+  function clearShipForm(){
+    ['ship_license','ship_intestatario','ship_email','ship_wa'].forEach(id=>{
+      const el=qs('#'+id); if(el) el.value='';
+    });
+    qs('#shipStatus').textContent='';
+  }
+
+  // Invia via Email
+  qs('#btnShipEmail')?.addEventListener('click', async () => {
+    const key  = qs('#ship_license').value.trim();
+    const name = qs('#ship_intestatario').value.trim();
+    const to   = qs('#ship_email').value.trim();
+    if (!key || !to){ notify('Compila almeno codice licenza ed email.'); return; }
+
+    const btnE = qs('#btnShipEmail');                      // ← aggiunta
+    setBusy(btnE, true, 'Invio…');                         // ← aggiunta
+    try{
+      qs('#shipStatus').textContent = 'Invio email...';
+
+        const res = await fetch(SEND_EMAIL_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'X-CSRF-Token': window.CSRF_TOKEN
+          },
+          body: JSON.stringify({ license_key: key, intestatario: name, email: to })
+        });
+
+      const text = await res.text();
+      let js; try { js = JSON.parse(text); }
+      catch { throw new Error('Risposta non-JSON (forse login scaduto/redirect). Ricarica la pagina e riprova.'); }
+      if (!res.ok || !js.ok) throw new Error(js.msg || 'Errore invio email');
+
+      const resMark = await markSent(key, to, '', 'email');
+      const sentAt  = (resMark && resMark.sent_at) || new Date().toISOString().slice(0,19).replace('T',' ');
+      const channel = (resMark && resMark.channel) || 'email';
+
+      qs('#shipStatus').textContent = 'Email inviata.';
+      refreshArchiveRow(key, { email: to, sent_at: sentAt, channel });
+      clearShipForm();
+
+    }catch(e){
+      qs('#shipStatus').textContent = 'Errore invio email.';
+      notify('Errore: ' + (e.message || e));
+    } finally {
+      setBusy(btnE, false);                                 // ← aggiunta
+    }
+  });
+
+  // Invia via WhatsApp
+  qs('#btnShipWa')?.addEventListener('click', async () => {
+    const key  = qs('#ship_license').value.trim();
+    const name = qs('#ship_intestatario').value.trim();
+    const raw  = qs('#ship_wa').value.trim();
+    if (!key || !raw){ notify('Compila almeno codice licenza e numero WhatsApp.'); return; }
+
+    const linkNum = normWaForLink(raw);
+    const pretty  = prettyPhone(raw);
+    const msg     = buildMessage(key, name);
+
+    const btnW = qs('#btnShipWa');                         // ← aggiunta
+    setBusy(btnW, true, 'Aprendo…');                       // ← aggiunta
+    // apre WhatsApp
+    window.open(`https://wa.me/${linkNum}?text=${encodeURIComponent(msg)}`, '_blank');
+
+    try{
+      const resMark = await markSent(key, '', pretty, 'wa');
+      const sentAt  = (resMark && resMark.sent_at) || new Date().toISOString().slice(0,19).replace('T',' ');
+      const channel = (resMark && resMark.channel) || 'wa';
+
+      qs('#shipStatus').textContent='WhatsApp preparato.';
+      refreshArchiveRow(key, { wa_phone: pretty, sent_at: sentAt, channel });
+      clearShipForm();
+    }catch(e){
+      notify('Errore salvataggio invio WA: ' + (e.message || e));
+    } finally {
+      setBusy(btnW, false);                                 // ← aggiunta
+    }
+  });  
+
+  function setBusy(btn, busy, labelBusy){
+    if (!btn) return;
+    if (busy){
+      btn.dataset._label = btn.textContent;
+      btn.disabled = true;
+      if (labelBusy) btn.textContent = labelBusy;
+    } else {
+      btn.disabled = false;
+      if (btn.dataset._label){
+        btn.textContent = btn.dataset._label;
+        delete btn.dataset._label;
+      }
+    }
+  }
+
+  // Invio con tasto Invio nel blocco Spedizione
+  qs('#shipBlock')?.addEventListener('keydown', (e)=>{
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const email = qs('#ship_email')?.value.trim();
+    const wa    = qs('#ship_wa')?.value.trim();
+    if (email) {
+      qs('#btnShipEmail')?.click();
+    } else if (wa) {
+      qs('#btnShipWa')?.click();
+    } else {
+      notify('Inserisci email o numero WhatsApp.');
+    }
+  });
+
+  // --- BLOCCO 3: archivio
+  function parseMeta(raw){ try { return raw ? JSON.parse(raw) : {}; } catch { return {}; } }
+
+  function channelBadge(chan){
+    if (chan === 'wa')    return '<span class="badge bg-success">WhatsApp</span>';
+    if (chan === 'email') return '<span class="badge bg-primary">Email</span>';
+    return '';
+  }
+
+  function linkifyEmail(email){
+    return email ? `<a href="mailto:${email}">${email}</a>` : '';
+  }
+  function linkifyWa(raw){
+    if (!raw) return '';
+    const num = normWaForLink(raw);
+    const pretty = prettyPhone(raw);
+    return `<a href="https://wa.me/${num}" target="_blank" rel="noopener">${pretty}</a>`;
+  }
+
+  function applyExpiryClass(tr, expStr){
+    tr.classList.remove('table-warning','table-danger');
+    if (!expStr) return;
+    const d = Date.parse(expStr.trim() + 'T00:00:00');
+    if (Number.isNaN(d)) return;
+    const today = new Date(); today.setHours(0,0,0,0);
+    const diff = d - today.getTime();
+    if (diff < 0) tr.classList.add('table-danger');           // scaduta
+    else if (diff <= 15*24*60*60*1000) tr.classList.add('table-warning'); // in scadenza
+  }
+
+  function setStateBadge(tr){
+    const td = tr.querySelector('.col-state');
+    if (!td) return;
+    const original = td.textContent.trim(); // "Attiva" o "Non attiva"
+
+    if (tr.classList.contains('table-danger')) {
+      td.innerHTML = '<span class="badge bg-danger">Scaduta</span>';
+    } else if (tr.classList.contains('table-warning')) {
+      // Mostra "In scadenza" solo se era "Attiva"
+      if (/^attiva$/i.test(original)) {
+        td.innerHTML = '<span class="badge bg-warning text-dark">In scadenza</span>';
+      }
+    } else {
+      // Rimane com'è (Attiva / Non attiva)
+    }
+  }
+
+  function fmtSent(s){
+    if (!s) return '';
+    const d = new Date((s||'').replace(' ', 'T'));
+    if (Number.isNaN(d.getTime())) return s;
+    return d.toLocaleString('it-IT', { year:'2-digit', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+  }
+
+  const SORT_KEY = 'adminLicSort';
+  function saveSort(){ try{ localStorage.setItem(SORT_KEY, JSON.stringify(sortState)); }catch{} }
+  function loadSort(){
+    try{
+      const raw = localStorage.getItem(SORT_KEY);
+      if (!raw) return;
+      const s = JSON.parse(raw)||{};
+      if (s.by && s.dir) sortState = { by: s.by, dir: s.dir };
+    }catch{}
+  }
+
+
+  let sortState = { by: 'sent', dir: 'desc' }; // default: come ora
+
+  function sortValue(tr, by){
+    if (by === 'sent'){
+      const s = tr.querySelector('.col-sent')?.textContent.trim() || '';
+      // usa l'ISO per il confronto: teniamo anche sent “raw” se presente in data-meta
+      const meta = parseMeta(tr.getAttribute('data-meta'));
+      const raw  = meta?.sent_at || s.replace('/','-'); // fallback
+      return raw ? (Date.parse((raw+'').replace(' ', 'T')) || 0) : 0;
+    }
+    if (by === 'exp'){
+      const e = tr.querySelector('.col-exp')?.textContent.trim() || '';
+      return e ? (Date.parse(e+'T00:00:00') || 0) : 0;
+    }
+    return 0;
+  }
+
+  function applySort(by, dir){
+    const tbody = qs('#tblArchivio tbody');
+    const rows = qsa('#tblArchivio tbody tr').filter(tr => tr.style.display !== 'none');
+
+    rows.sort((a,b)=>{
+      const va = sortValue(a, by);
+      const vb = sortValue(b, by);
+      return dir === 'asc' ? (va - vb) : (vb - va);
+    });
+
+    rows.forEach(tr => tbody.appendChild(tr));
+
+    // indicatori ▲▼
+    qsa('#tblArchivio thead th[data-sort]').forEach(th => th.classList.remove('asc','desc'));
+    const th = qs(`#tblArchivio thead th[data-sort="${by}"]`);
+    if (th) th.classList.add(dir);
+
+    sortState = { by, dir };
+  }
+
+  // Click sull’intestazione
+  qs('#tblArchivio thead')?.addEventListener('click', (e)=>{
+    const th = e.target.closest('th[data-sort]'); if (!th) return;
+    const by = th.getAttribute('data-sort');
+    const dir = (sortState.by === by && sortState.dir === 'desc') ? 'asc' : 'desc';
+    applySort(by, dir);
+  });
+
+  function daysDiffLabel(expStr){
+    if (!expStr) return '';
+    const d = Date.parse(expStr.trim() + 'T00:00:00');
+    if (Number.isNaN(d)) return '';
+    const today = new Date(); today.setHours(0,0,0,0);
+    const diffDays = Math.round((d - today.getTime()) / 86400000);
+    if (diffDays < 0)  return `Scaduta da ${Math.abs(diffDays)} giorni`;
+    if (diffDays === 0) return 'Scade oggi';
+    if (diffDays === 1) return 'Scade domani';
+    return `Mancano ${diffDays} giorni`;
+  }
+
+  function renderArchivio(){
+    const tbody = qs('#tblArchivio tbody');
+    let shown = 0;
+    const rowsWithDate = [];
+
+    qsa('#tblArchivio tbody tr').forEach(tr=>{
+      const meta  = parseMeta(tr.getAttribute('data-meta'));
+      const email = meta.ship_email || tr.querySelector('.col-email').textContent.trim();
+      const wa    = meta.wa_phone || '';
+      const sent  = meta.sent_at || '';
+      const chan  = meta.last_channel || (email ? 'email' : (wa ? 'wa' : ''));
+      const exp   = tr.querySelector('.col-exp')?.textContent.trim() || '';
+      const expTd = tr.querySelector('.col-exp');
+      if (expTd) expTd.title = daysDiffLabel(exp);
+
+      tr.querySelector('.col-email').innerHTML = linkifyEmail(email);
+      tr.querySelector('.col-wa').innerHTML    = linkifyWa(wa);
+      tr.querySelector('.col-sent').textContent= sent || '';
+      tr.querySelector('.col-sent').textContent = fmtSent(sent);
+
+      const chanTd = tr.querySelector('.col-chan');
+      if (chanTd) {
+        chanTd.innerHTML = channelBadge(chan);
+        chanTd.title = chan === 'email' ? (email || '') : (chan === 'wa' ? (wa || '') : '');
+      }
+
+      applyExpiryClass(tr, exp);
+      setStateBadge(tr);
+
+      const visible = !!(email || wa || sent);
+      tr.style.display = visible ? '' : 'none';
+      if (visible) {
+        shown += 1;
+        const ts = sent ? (Date.parse(sent.replace(' ', 'T')) || 0) : 0;
+        rowsWithDate.push({ tr, ts });
+      }
+    });
+
+    rowsWithDate.sort((a,b)=> b.ts - a.ts);
+    rowsWithDate.forEach(({tr}) => tbody.appendChild(tr));
+
+    qs('#tblNote').textContent = shown ? `Mostrate ${shown} licenze inviate` : 'Nessuna licenza inviata trovata';
+  }
+
+  function updateNote(){
+    const allRows = qsa('#tblArchivio tbody tr').filter(tr=>{
+      const email = tr.querySelector('.col-email')?.textContent.trim();
+      const wa    = tr.querySelector('.col-wa')?.textContent.trim();
+      const sent  = tr.querySelector('.col-sent')?.textContent.trim();
+      return !!(email || wa || sent); // righe “inviate”
+    });
+
+    const visibleRows = allRows.filter(tr => tr.style.display !== 'none');
+    const all = allRows.length;
+    const visible = visibleRows.length;
+
+    // conteggi per canale sui VISIBILI
+    let emailCnt = 0, waCnt = 0;
+    visibleRows.forEach(tr=>{
+      const meta = parseMeta(tr.getAttribute('data-meta'));
+      const emailTxt = tr.querySelector('.col-email')?.textContent.trim();
+      const waTxt    = tr.querySelector('.col-wa')?.textContent.trim();
+      const chan = meta.last_channel || (emailTxt ? 'email' : (waTxt ? 'wa' : ''));
+      if (chan === 'email') emailCnt++;
+      else if (chan === 'wa') waCnt++;
+    });
+
+    qs('#tblNote').textContent = all
+      ? `Mostrate ${visible} di ${all} licenze inviate — Email ${emailCnt} | WhatsApp ${waCnt}`
+      : 'Nessuna licenza inviata trovata';
+  }
+
+
+  const FILTERS_KEY = 'adminLicFilters';
+
+  function saveFilters(){
+    const data = {
+      int:    qs('#flt_intestatario')?.value || '',
+      email:  qs('#flt_email')?.value        || '',
+      date:   qs('#flt_data')?.value         || '',
+      stato:  qs('#flt_stato')?.value        || '',
+      canale: qs('#flt_canale')?.value       || ''   // ⬅️ qui
+    };
+    try { localStorage.setItem(FILTERS_KEY, JSON.stringify(data)); } catch {}
+  }
+
+  function loadFilters(){
+    try {
+      const raw = localStorage.getItem(FILTERS_KEY);
+      if (!raw) return;
+      const d = JSON.parse(raw) || {};
+      if (qs('#flt_intestatario')) qs('#flt_intestatario').value = d.int    || '';
+      if (qs('#flt_email'))        qs('#flt_email').value        = d.email  || '';
+      if (qs('#flt_data'))         qs('#flt_data').value         = d.date   || '';
+      if (qs('#flt_stato'))        qs('#flt_stato').value        = d.stato  || '';
+      if (qs('#flt_canale'))       qs('#flt_canale').value       = d.canale || ''; // ⬅️ qui
+    } catch {}
+  }
+
+
+  // ↓ sostituisci tutta la tua function applyFilters con questa
+  function applyFilters(){
+    const fInt   = qs('#flt_intestatario')?.value.trim().toLowerCase() || '';
+    const fEmail = qs('#flt_email')?.value.trim().toLowerCase() || '';
+    const fDate  = qs('#flt_data')?.value.trim() || '';
+    const fStato = qs('#flt_stato')?.value || '';
+    const fChan  = qs('#flt_canale')?.value || '';
+
+    qsa('#tblArchivio tbody tr').forEach(tr=>{
+      // base: “inviate”
+      const emailTxt = tr.querySelector('.col-email').textContent.trim();
+      const waTxt    = tr.querySelector('.col-wa').textContent.trim();
+      const sentTxt  = tr.querySelector('.col-sent').textContent.trim();
+      const eligible = !!(emailTxt || waTxt || sentTxt);
+      if (!eligible) { tr.style.display = 'none'; return; }
+
+      // meta per data/chan
+      const meta    = parseMeta(tr.getAttribute('data-meta'));
+      const sentRaw = meta.sent_at || '';
+      const chan    = meta.last_channel || (emailTxt ? 'email' : (waTxt ? 'wa' : ''));
+
+      const tInt   = tr.querySelector('.col-int').textContent.trim().toLowerCase();
+      const tEmail = emailTxt.toLowerCase();
+      const tDate  = sentRaw ? sentRaw.slice(0,10) : '';
+
+      const isScaduta = tr.classList.contains('table-danger');
+      const isPresto  = tr.classList.contains('table-warning');
+      const isAttiva  = !isScaduta && !isPresto;
+
+      const statoOk =
+        !fStato ||
+        (fStato === 'scadute' && isScaduta) ||
+        (fStato === 'presto'  && isPresto)  ||
+        (fStato === 'attive'  && isAttiva);
+
+      const chanOk = !fChan || chan === fChan;
+
+      const ok = (fInt ? tInt.includes(fInt) : true)
+              && (fEmail ? tEmail.includes(fEmail) : true)
+              && (fDate ? tDate === fDate : true)
+              && statoOk
+              && chanOk;
+
+      tr.style.display = ok ? '' : 'none';
+    });
+
+    updateNote();
+    applySort(sortState.by, sortState.dir);
+  }
+
+  function exportCsv(){
+    const rows = [['license_key','intestatario','email','whatsapp','sent_at','channel','expiry']];
+    qsa('#tblArchivio tbody tr').forEach(tr=>{
+      if (tr.style.display === 'none') return;
+      const meta  = parseMeta(tr.getAttribute('data-meta'));
+      const key   = tr.querySelector('code').textContent.trim();
+      const intest= tr.querySelector('.col-int').textContent.trim();
+      const em    = tr.querySelector('.col-email').textContent.trim();
+      const wa    = tr.querySelector('.col-wa').textContent.trim();
+      const sent  = tr.querySelector('.col-sent').textContent.trim();
+      const chan  = meta.last_channel || (em ? 'email' : (wa ? 'wa' : ''));
+      const exp   = tr.querySelector('.col-exp')?.textContent.trim() || '';
+      rows.push([key,intest,em,wa,sent,chan,exp]);
+    });
+
+    const csv  = rows.map(r=>r.map(v=>`"${(v||'').replace(/"/g,'""')}"`).join(',')).join('\r\n');
+    const BOM  = '\ufeff'; // compat Excel
+    const blob = new Blob([BOM + csv], {type:'text/csv;charset=utf-8;'});
+
+    // nome file: licenze_inviate_YYYYMMDD_HHMM.csv
+    const d = new Date();
+    const pad = n => String(n).padStart(2,'0');
+    const fname = `licenze_inviate_${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}.csv`;
+
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fname;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function refreshArchiveRow(key, {email, wa_phone, sent_at, channel}){
+    const tr = qsa('#tblArchivio tbody tr').find(tr=>tr.getAttribute('data-license')===key);
+    if (!tr) return;
+
+    // UI cells
+    if (email)    tr.querySelector('.col-email').innerHTML = linkifyEmail(email);
+    if (wa_phone) tr.querySelector('.col-wa').innerHTML    = linkifyWa(wa_phone);
+    if (sent_at)  tr.querySelector('.col-sent').textContent = fmtSent(sent_at);
+
+    // Badge + tooltip
+    const chanTd = tr.querySelector('.col-chan');
+    if (chanTd) {
+      chanTd.innerHTML = channelBadge(channel);
+      const emailTxt = (email ?? tr.querySelector('.col-email')?.textContent.trim()) || '';
+      const waTxt    = (wa_phone ?? tr.querySelector('.col-wa')?.textContent.trim()) || '';
+      chanTd.title = channel === 'email' ? emailTxt : (channel === 'wa' ? waTxt : '');
+    }
+
+    // Assicurati che la riga sia visibile
+    tr.style.display = '';
+
+    // Aggiorna meta per filtri/sort
+    const meta = parseMeta(tr.getAttribute('data-meta'));
+    if (email)    meta.ship_email  = email;
+    if (wa_phone) meta.wa_phone    = wa_phone;
+    if (sent_at)  meta.sent_at     = sent_at;     // ISO: "YYYY-MM-DD HH:MM:SS"
+    if (channel)  meta.last_channel= channel;
+    tr.setAttribute('data-meta', JSON.stringify(meta));
+
+    updateNote();
+    applySort(sortState.by, sortState.dir);
+  }
+
+  // Copy
+  qsa('.btn-copy').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const key = btn.getAttribute('data-key') || '';
+      try { await navigator.clipboard.writeText(key); notify('Licenza copiata.'); } catch {}
+    });
+  });
+
+  // Revoca (delegato, robusto al non-JSON)
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.btn-revoke');
+    if (!btn) return;
+
+    const tr  = btn.closest('tr');
+    const id  = Number(btn.dataset.id);
+    const key = btn.dataset.key;
+
+    if (!confirm(`Confermi la revoca della licenza ${key}?`)) return;
+
+    try {
+      const res = await fetch(REVOKE_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-CSRF-Token': window.CSRF_TOKEN
+        },
+        body: JSON.stringify({ id })
+      });
+
+      const text = await res.text();
+      let data; try { data = JSON.parse(text); }
+      catch { throw new Error('Risposta non-JSON (forse login scaduto/redirect). Ricarica la pagina e riprova.'); }
+
+      if (!res.ok || !data.ok) throw new Error(data.msg || 'Errore revoca');
+
+      tr.remove();
+      notify(`Licenza ${key} revocata e rimossa.`);
+    } catch (err) {
+      notify('Errore: ' + (err.message || err));
+    }
+  });
+
+  // Spedisci: precompila il blocco Invio dalla riga selezionata
+  document.addEventListener('click', (e)=>{
+    const btn = e.target.closest('.btn-ship');
+    if (!btn) return;
+    const tr   = btn.closest('tr');
+    const key  = tr?.getAttribute('data-license') || '';
+    const name = tr?.querySelector('.col-int')?.textContent.trim() || '';
+    const emailTxt = tr?.querySelector('.col-email')?.textContent.trim() || '';
+    const waTxt    = tr?.querySelector('.col-wa')?.textContent.trim() || '';
+
+    if (qs('#ship_license'))     qs('#ship_license').value     = key;
+    if (qs('#ship_intestatario')) qs('#ship_intestatario').value = name;
+    if (qs('#ship_email'))       qs('#ship_email').value       = emailTxt;
+    if (qs('#ship_wa'))          qs('#ship_wa').value          = waTxt;
+
+    qs('#shipBlock')?.scrollIntoView({behavior:'smooth', block:'start'});
+    (emailTxt ? qs('#ship_email') : qs('#ship_wa'))?.focus();
+  });
+
+  function resetFilters(){
+    ['#flt_intestatario','#flt_email','#flt_data'].forEach(id=>{
+      const el = qs(id); if (el) el.value = '';
+    });
+    const st = qs('#flt_stato');  if (st) st.value = '';
+    const ch = qs('#flt_canale'); if (ch) ch.value = '';   // ⬅️ qui
+
+    renderArchivio();
+    applyFilters();
+    saveFilters();
+  }
+
+  // filtri + export
+  ['#flt_intestatario','#flt_email','#flt_data']
+    .forEach(id => qs(id)?.addEventListener('input', ()=>{ applyFilters(); saveFilters(); }));
+  qs('#flt_stato')?.addEventListener('change', ()=>{ applyFilters(); saveFilters(); });
+  qs('#btnExportCsv')?.addEventListener('click', exportCsv);
+  qs('#btnResetFilters')?.addEventListener('click', (e)=>{ e.preventDefault(); resetFilters(); saveFilters(); });
+  qs('#flt_canale')?.addEventListener('change', ()=>{ applyFilters(); saveFilters(); });
+
+  // render iniziale archivio + ripristino filtri
+  loadFilters();
+  loadSort();
+  renderArchivio();  
+  applyFilters();
+  applySort(sortState.by, sortState.dir);
+  saveSort();
+
+})();
+</script>
+
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Condizioni Generali d’Uso - RistoSmart FM{% endblock %}
+{% block content %}
+
+<div class="container-fluid mt-4">
+  <div class="box-sezione">
+    <h2>📜 Condizioni Generali d’Uso</h2>
+
+    <p><strong>Ultimo aggiornamento: {{ datetime.now().strftime('%d/%m/%Y') }}</strong></p>
+
+    <h3>1. Accettazione delle condizioni</h3>
+    <p>L’utente accetta integralmente le presenti condizioni d’uso utilizzando RistoSmart FM. L’accesso all’applicazione implica l’accettazione esplicita di quanto riportato.</p>
+
+    <h3>2. Licenza d’uso</h3>
+    <p>RistoSmart FM è distribuito su licenza individuale. Ogni cliente acquista una licenza valida per un singolo dispositivo e un singolo utente. La licenza non è trasferibile, né revocabile senza consenso scritto.</p>
+
+    <h3>3. Proprietà intellettuale</h3>
+    <p>Tutti i diritti su RistoSmart FM, inclusi software, codice, design e contenuti, sono di proprietà esclusiva dello sviluppatore. L’utente ottiene solo una licenza limitata, non esclusiva e non trasferibile, per uso personale e professionale.</p>
+
+    <h3>4. Privacy e protezione dati</h3>
+    <p>RistoSmart FM non invia dati su server remoti. I dati dell’utente sono memorizzati esclusivamente sul proprio computer nel file <code>ristosmart.db</code>. Non vengono raccolti, analizzati né condivisi con terze parti. Per maggiori informazioni, consulta la nostra <a href="/privacy">Policy di Privacy</a>.</p>
+
+    <h3>5. Responsabilità</h3>
+    <p>Lo sviluppatore non è responsabile di danni derivanti da:</p>
+    <ul>
+      <li>Perdita di dati dovuta a malfunzionamenti hardware o umani</li>
+      <li>Utilizzo improprio dell’applicazione</li>
+      <li>Manomissioni non autorizzate del file database</li>
+    </ul>
+    <p>L’utente è responsabile del backup periodico del proprio file <code>ristosmart.db</code>.</p>
+
+    <h3>6. Aggiornamenti</h3>
+    <p>Le versioni future dell’app potranno includere nuove funzionalità o modifiche. Gli aggiornamenti saranno disponibili tramite download dal sito ufficiale.</p>
+
+    <h3>7. Contatti</h3>
+    <p>Per domande legali o supporto tecnico: <a href="mailto:ristoconsulenze@gmail.com">ristoconsulenze@gmail.com</a></p>
+
+    <hr>
+    <p><small>Questo documento è parte integrante della licenza d’uso di RistoSmart FM.</small></p>
+  </div>
+</div>
+
+{% endblock %}

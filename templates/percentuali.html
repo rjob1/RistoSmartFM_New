@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Controllo Percentuali{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4 px-4 percentuali-container">
+
+  <h2 class="mb-3">Controllo percentuali mese per mese</h2>
+
+  <p class="text-muted">
+    Il controllo delle percentuali mensili è uno strumento fondamentale per avere una visione chiara e strategica dell’andamento del tuo ristorante:
+    ti permette di monitorare costi, ricavi e margini in tempo reale, trasformando i numeri in decisioni consapevoli.
+  </p>
+
+  <hr>
+
+  <h4>Controllo Spese</h4>
+  <p>🎯 Analizza l’andamento delle spese e la loro incidenza per ogni mese, confrontando in maniera immediata i risultati.</p>
+
+  <!-- Griglia grafici -->
+  <div class="row">
+    {% for mese in [
+      "Gennaio","Febbraio","Marzo",
+      "Aprile","Maggio","Giugno",
+      "Luglio","Agosto","Settembre",
+      "Ottobre","Novembre","Dicembre"
+    ] %}
+      <div class="col-md-4 mb-4">
+        <div class="card shadow-sm p-3">
+          <h6 class="text-center">{{ mese }}</h6>
+          <canvas id="chart-{{ loop.index0 }}"></canvas>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="alert alert-info mt-4">
+    <strong>Nota tecnica:</strong> mantenere sempre le stesse categorie e la stessa scala di rappresentazione per tutti i mesi,
+    in modo da garantire un confronto coerente e immediato.
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const categorie = ["Canone", "Mutuo", "Finanziamenti", "Stipendi", "Fatture"];
+  const colors = ["#003366", "#005599", "#ffd633", "#ff6666", "#66cc99"];
+
+  for (let i = 0; i < 12; i++) {
+    const ctx = document.getElementById(`chart-${i}`);
+    new Chart(ctx, {
+      type: "doughnut",
+      data: {
+        labels: categorie,
+        datasets: [{
+          data: [0, 0, 0, 0, 0], // valori segnaposto da sostituire via API
+          backgroundColor: colors,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { position: "bottom" }
+        }
+      }
+    });
+  }
+});
+</script>
+{% endblock %}

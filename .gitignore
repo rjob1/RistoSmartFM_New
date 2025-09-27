@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual env
+venv/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env / secrets
+.env
+.flaskenv
+
+# DB / backup / archivi
+*.db
+*.db-*
+*.sqlite*
+backup/
+*.zip
+
+# IDE / editor
+.vscode/
+.idea/
+*.code-workspace

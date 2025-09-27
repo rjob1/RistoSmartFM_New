@@ -1,0 +1,618 @@
+{% extends "base.html" %}
+{% block title %}RistoSmart FM / Gestione Personale{% endblock %}
+{% block content %}
+
+<style>
+  /* --- BOX PRINCIPALE --- */
+  .container { max-width:100%; width:100%; margin:0 auto; padding:0 10px; }
+  .box-sezione {
+    background:#f8f9fa; border:2px solid #dee2e6; border-radius:8px;
+    padding:20px; margin-bottom:40px;
+    max-width: var(--my-box-width, 1720px) !important;
+    margin-inline:auto;
+  }
+  h2 { background:#002F6C; color:#fff; padding:10px; border-radius:6px;
+       font-size:1.4rem; margin-bottom:15px; }
+  .header-controls {
+    display:flex; justify-content:space-between; align-items:center;
+    gap:20px; margin-bottom:30px; flex-wrap:wrap;
+  }
+  .header-controls select,
+  .header-controls button { font-size:.9rem; padding:0 12px;
+    height:36px; border-radius:4px; border:1px solid #ccc;
+  }
+  .email-btn { background:#28a745; color:#fff; }
+  .email-btn:hover { background:#218838; }
+  .msg-success {
+    background:#d4edda; border:1px solid #c3e6cb; color:#04290c;
+    padding:4px 12px; border-radius:4px; font-size:.9rem;
+    font-weight:600; white-space:nowrap;
+  }
+  .container-fluid { max-width:none !important; padding:0 10px; }
+
+  /* --- TABELLA E FORM INSERIMENTO --- */
+  .container-inserimento .form-control,
+  .container-inserimento .form-select { font-size:.9rem; padding:.2rem; }
+  .icon-btn.add { color:#28a745 !important; background:none; border:none;
+    font-size:1.3em; vertical-align:middle; cursor:pointer;
+  }
+  .icon-btn.add:hover { background:#e6ffec; border-radius:3px; }
+
+  .responsive-table { overflow-x:auto; width:100%; }
+  .scroll-table-wrapper { display:block; width:100%; overflow-x:auto; }
+  table {
+    width:100%; border-collapse:collapse; font-size:.86rem;
+  }
+  th, td {
+    border:1px solid #ccc; padding:2px 4px; white-space:nowrap;
+    line-height:1.1; font-size:.86rem;
+  }
+  th { background:#e9ecef; font-weight:600; }
+
+  /* popup scadenze */
+  .popup-scadenze {
+    position:fixed; top:0; left:0; width:100%; height:100%;
+    background:rgba(0,0,0,.5); display:flex;
+    align-items:center; justify-content:center; z-index:9999;
+  }
+  .popup-box {
+    background:#fff; padding:25px; border-radius:12px;
+    max-width:500px; width:90%; box-shadow:0 0 12px rgba(0,0,0,.3);
+  }
+  .btn-outline-secondary {
+    background:#e9ecef; color:#333; border:1px solid #ccc;
+  }
+  .btn-outline-secondary:hover { background:#d6d8db; color:#000; }
+</style>
+
+<div class="container-fluid mt-4">
+  <div class="box-sezione">
+
+    <h2 class="d-flex align-items-center justify-content-between w-100" style="font-size:1.4rem;">
+      <span class="d-flex align-items-center">
+        👥 Gestione Personale
+      </span>
+    </h2>
+
+    
+    <div class="header-controls">
+      <div class="left-controls">
+        <label for="filtro_ruolo"><strong>Filtra per ruolo:</strong></label>
+        <select id="filtro_ruolo">
+          <option value="">-- Tutti i ruoli --</option>
+          <option>Amministrazione</option>
+          <option>Staff Cucina</option>
+          <option>Staff Sala</option>
+          <option>Staff Lavapiatti</option>
+          <option>Staff Pulizie</option>
+          <option>Altro</option>
+        </select>
+        <button class="btn btn-warning ms-2" onclick="mostraPopupContrattiScadenza(true)">
+          📅 Contratti in scadenza
+        </button>
+      </div>
+      <div id="msg-dip-add" class="msg-success" style="display:none;">Dipendente aggiunto</div>
+      <div class="right-controls d-flex flex-wrap align-items-center gap-2">
+        <a class="btn btn-outline-primary" href="{{ url_for('stipendi', anno=page_year) }}"><i class="bi bi-grid-3x3-gap"></i> Vai al dettaglio stipendi</a>
+        <button class="email-btn" onclick="inviaEmailContratti()">�Y"� Invia tutti i contratti</button>
+        <button class="btn btn-outline-secondary" onclick="inviaSoloScadenze()">�Y"� Invia solo contratti in scadenza</button>
+      </div>
+    </div>
+
+    <div class="container-inserimento mb-4">
+      <div class="row gx-2 mb-2">
+        <div class="col"><input id="nome" class="form-control" placeholder="Nome"></div>
+        <div class="col">
+          <select id="ruolo" class="form-select">
+            <option>Amministrazione</option><option>Staff Cucina</option>
+            <option>Staff Sala</option><option>Staff Lavapiatti</option>
+            <option>Staff Pulizie</option><option>Altro</option>
+          </select>
+        </div>
+        <div class="col"><input id="assunzione" type="date" class="form-control" required></div>
+        <div class="col">
+          <select id="rapporto" class="form-select">
+            <option>Indeterminato</option><option>Determinato</option>
+            <option>Part-Time</option><option>Apprendistato</option>
+            <option>Intermittente (a chiamata)</option>
+            <option>Contratto stagionale</option>
+            <option>Somministrazione (agenzia)</option>
+            <option>Collaborazioni occasionali</option>
+          </select>
+        </div>
+        <div class="col"><input id="fine" type="date" class="form-control" placeholder="Fine rapporto"></div>
+      </div>
+      <div class="row gx-2 mb-3">
+        <div class="col"><input id="telefono" type="tel" placeholder="Telefono" class="form-control"></div>
+        <div class="col"><input id="email" type="email" placeholder="Email" class="form-control"></div>
+        <div class="col"><input id="iban" placeholder="IBAN" class="form-control"></div>
+        <div class="col"><input id="riposo" placeholder="Riposo" class="form-control"></div>
+      </div>
+      <div class="row">
+        <div class="col-12">
+          <button class="btn btn-success w-100" onclick="aggiungiDipendente()">➕ Aggiungi</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="responsive-table">
+      <div class="tabella-personale-wrapper">
+        <div class="scroll-table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Nome</th><th>Ruolo</th><th>Assunzione</th>
+                <th>Rapporto</th><th>Fine</th>
+                <th class="telefono">Telefono</th><th>Email</th>
+                <th>IBAN</th><th>Riposo</th><th>Azioni</th>
+              </tr>
+            </thead>
+            <tbody id="tabellaPersonale"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+        
+    <div id="toast" style="
+         display:none;
+         position:fixed; bottom:20px; left:50%;
+         transform:translateX(-50%);
+         background:#28a745; color:#fff;
+         padding:8px 16px;
+         border-radius:4px;
+         font-weight:600;
+         z-index:9999;"></div>
+
+  </div>
+</div>
+
+<div id="popup-scadenze" class="popup-scadenze" style="display:none;">
+  <div class="popup-box">
+    <h3>📅 Contratti in scadenza</h3>
+    <div id="contenuto-scadenze"></div>
+    <button id="chiudiPopupBtn" class="btn btn-secondary mt-3">Chiudi</button>
+  </div>
+</div>
+
+<script>
+// --- GESTIONE PERSONALE (pulita) ---
+
+const STORAGE_KEY = "personale";
+const MESI = ["gennaio","febbraio","marzo","aprile","maggio","giugno","luglio","agosto","settembre","ottobre","novembre","dicembre"];
+const mappaID = {
+  "Amministrazione":"amministrazione",
+  "Staff Cucina":"staff-cucina",
+  "Staff Sala":"staff-sala",
+  "Staff Lavapiatti":"staff-lavapiatti",
+  "Staff Pulizie":"staff-pulizie",
+  "Altro":"altro"
+};
+
+// CSRF dal server
+const CSRF_TOKEN = "{{ csrf_token }}";
+
+// Stato UI
+let editingIdx = null;
+
+// ----------------- Helper base -----------------
+// ----------------- Helper base -----------------
+function normalizzaDipendente(d) {
+  const obj = d || {};
+  const toStr = (v) => (v === undefined || v === null) ? "" : String(v).trim();
+  return {
+    id: obj.id ?? obj.ID ?? null,
+    nome: toStr(obj.nome ?? obj.name),
+    ruolo: toStr(obj.ruolo ?? ""),
+    dataAssunzione: toStr(obj.data_assunzione ?? obj.dataAssunzione ?? ""),
+    tipoRapporto: toStr(obj.rapporto ?? obj.tipoRapporto ?? ""),
+    dataFine: toStr(obj.data_fine ?? obj.dataFine ?? ""),
+    telefono: toStr(obj.telefono ?? ""),
+    email: toStr(obj.email ?? ""),
+    iban: toStr(obj.iban ?? ""),
+    riposo: toStr(obj.riposo ?? "")
+  };
+}
+
+function serializzaDipendente(d) {
+  return {
+    id: d.id ?? null,
+    nome: d.nome || "",
+    ruolo: d.ruolo || "",
+    data_assunzione: d.dataAssunzione || "",
+    rapporto: d.tipoRapporto || "",
+    data_fine: d.dataFine || "",
+    telefono: d.telefono || "",
+    email: d.email || "",
+    iban: d.iban || "",
+    riposo: d.riposo || ""
+  };
+}
+
+function loadPers() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    return Array.isArray(raw) ? raw.map(normalizzaDipendente) : [];
+  } catch (e) {
+    console.warn("Errore parsing localStorage personale:", e);
+    return [];
+  }
+}
+
+function savePers(arr) {
+  const normalized = (arr || []).map(normalizzaDipendente);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+}
+
+function stripeDipendente(msg = "✅ Dipendente aggiunto") {
+  const s = document.getElementById("msg-dip-add");
+  if (!s) return;
+  s.textContent = msg;
+  s.style.display = "inline-block";
+  clearTimeout(stripeDipendente._t);
+  stripeDipendente._t = setTimeout(() => s.style.display = "none", 3000);
+}
+
+function resetForm() {
+  const ids = ["nome", "ruolo", "assunzione", "rapporto", "fine", "telefono", "email", "iban", "riposo"];
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (el.tagName === "SELECT") el.selectedIndex = 0;
+    else el.value = "";
+  });
+}
+
+
+// ----------------- Sync server -----------------
+async function sincronizzaPersonale() {
+  try {
+    const res = await fetch("/api/personale");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data && Array.isArray(data.personale)) {
+      const norm = data.personale.map(normalizzaDipendente);
+      savePers(norm);
+      // ✅ RIMOSSO: rebuildQuotePersonale(norm)
+    }
+  } catch (e) {
+    console.warn("Sync personale fallita:", e);
+  }
+  visualizza();
+}
+
+// ----------------- CRUD UI -----------------
+async function aggiungiDipendente() {
+  const elNome = document.getElementById("nome");
+  const elAssunzione = document.getElementById("assunzione");
+  const elRuolo = document.getElementById("ruolo");
+  const elRapporto = document.getElementById("rapporto");
+  const elFine = document.getElementById("fine");
+  const elTelefono = document.getElementById("telefono");
+  const elEmail = document.getElementById("email");
+  const elIban = document.getElementById("iban");
+  const elRiposo = document.getElementById("riposo");
+
+  if (!elNome || !elAssunzione) {
+    alert("⚠️ Form non completamente caricato.");
+    return;
+  }
+
+  const nome = elNome.value.trim();
+  const dataAssunzione = elAssunzione.value;
+
+  if (!nome) {
+    alert("⚠️ Inserisci il nome del dipendente.");
+    elNome.focus();
+    return;
+  }
+
+  if (!dataAssunzione) {
+    alert("⚠️ Seleziona la data di assunzione.");
+    elAssunzione.focus();
+    return;
+  }
+
+  // Costruzione JSON con chiavi coerenti con il DB
+  const nuovo = {
+    nome,
+    ruolo: elRuolo?.value || "",
+    data_assunzione: dataAssunzione,
+    rapporto: elRapporto?.value || "",
+    data_fine: elFine?.value || "",
+    telefono: elTelefono?.value?.trim() || "",
+    email: elEmail?.value?.trim() || "",
+    iban: elIban?.value?.trim() || "",
+    riposo: elRiposo?.value?.trim() || ""
+  };
+
+  try {
+    const resp = await fetch("/api/personale", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": CSRF_TOKEN
+      },
+      body: JSON.stringify(nuovo)
+    });
+
+    const data = await resp.json();
+
+    if (resp.ok && data && data.success) {
+      await sincronizzaPersonale(); // ricarica da DB
+      localStorage.setItem("stipendi_update_trigger", Date.now().toString());
+      resetForm();
+      stripeDipendente("✅ Dipendente aggiunto");
+      return;
+    } else {
+      throw new Error(data.error || "Salvataggio fallito");
+    }
+  } catch (err) {
+    console.warn("POST /api/personale errore:", err);
+
+    // Fallback locale
+    const arr = loadPers();
+    nuovo.id = `local-${Date.now()}`;
+    arr.unshift(normalizzaDipendente(nuovo)); // normalizza per UI
+    savePers(arr);
+    if (typeof rebuildQuotePersonale === "function") rebuildQuotePersonale(arr);
+    localStorage.setItem("stipendi_update_trigger", Date.now().toString());
+    resetForm();
+    visualizza();
+    stripeDipendente("✅ Solo in locale");
+    alert("⚠️ Salvataggio su database fallito. Salvato in locale.");
+  }
+}
+
+
+function editDipendente(idx) {
+  editingIdx = idx;
+  visualizza();
+}
+
+async function salvaModifica(idx) {
+  const arr = loadPers();
+  const dip = arr[idx];
+  if (!dip) { alert("Dipendente non trovato."); return; }
+
+  const aggiornato = {
+    ...dip,
+    nome: document.getElementById("edit-nome")?.value.trim(),
+    ruolo: document.getElementById("edit-ruolo")?.value,
+    data_assunzione: document.getElementById("edit-assunzione")?.value,
+    rapporto: document.getElementById("edit-rapporto")?.value,
+    data_fine: document.getElementById("edit-fine")?.value,
+    telefono: document.getElementById("edit-telefono")?.value.trim(),
+    email: document.getElementById("edit-email")?.value.trim(),
+    iban: document.getElementById("edit-iban")?.value.trim(),
+    riposo: document.getElementById("edit-riposo")?.value.trim()
+  };
+
+  // Validazione minima
+  if (!aggiornato.nome) {
+    alert("⚠️ Nome richiesto.");
+    return;
+  }
+  if (!aggiornato.data_assunzione) {
+    alert("⚠️ Data di assunzione richiesta.");
+    return;
+  }
+
+  const isLocal = !aggiornato.id || String(aggiornato.id).startsWith("local-");
+
+  if (!isLocal) {
+    try {
+      const resp = await fetch(`/api/personale/${encodeURIComponent(aggiornato.id)}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": CSRF_TOKEN
+        },
+        body: JSON.stringify(aggiornato)
+      });
+      const data = await resp.json();
+      if (resp.ok && data?.success) {
+        arr[idx] = normalizzaDipendente({ ...aggiornato, id: aggiornato.id });
+        savePers(arr);
+        localStorage.setItem("stipendi_update_trigger", Date.now().toString());
+        editingIdx = null;
+        visualizza();
+        stripeDipendente("✅ Modifica salvata");
+        return;
+      } else {
+        throw new Error(data.error || "Aggiornamento fallito");
+      }
+    } catch (err) {
+      console.warn("PUT /api/personale errore:", err);
+    }
+  }
+
+  // Fallback locale
+  arr[idx] = normalizzaDipendente(aggiornato);
+  savePers(arr);
+  if (typeof rebuildQuotePersonale === "function") rebuildQuotePersonale(arr);
+  localStorage.setItem("stipendi_update_trigger", Date.now().toString());
+  editingIdx = null;
+  visualizza();
+  stripeDipendente("⚠️ Modifica locale");
+  alert("⚠️ Aggiornamento su DB fallito. Salvato in locale.");
+}
+
+async function elimina(idx) {
+  const arr = loadPers();
+  const d = arr[idx];
+  if (!d) { alert("Dipendente non trovato."); return; }
+  if (!confirm("Confermi eliminazione?")) return;
+
+  const isLocal = !d.id || String(d.id).startsWith("local-");
+
+  if (!isLocal) {
+    try {
+      const resp = await fetch(`/api/personale/${encodeURIComponent(d.id)}`, {
+        method: "DELETE",
+        headers: { "X-CSRF-Token": CSRF_TOKEN }
+      });
+      const data = await resp.json();
+      if (resp.ok && data && data.success) {
+        await sincronizzaPersonale();
+        localStorage.setItem("stipendi_update_trigger", Date.now().toString());
+        stripeDipendente("✅ Eliminato");
+        return;
+      }
+    } catch (err) {
+      console.warn("DELETE /api/personale errore:", err);
+    }
+  }
+
+  // Fallback locale
+  arr.splice(idx, 1);
+  savePers(arr);
+  rebuildQuotePersonale(arr);
+  localStorage.setItem("stipendi_update_trigger", Date.now().toString());
+  visualizza();
+  stripeDipendente("✅ Eliminato in locale");
+}
+
+// ----------------- Render tabella -----------------
+function visualizza() {
+  const filtro = document.getElementById("filtro_ruolo")?.value || "";
+  const tbody = document.getElementById("tabellaPersonale");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+
+  loadPers().forEach((p, i) => {
+    if (filtro && p.ruolo !== filtro) return;
+
+    const tr = document.createElement("tr");
+    const inEdit = (editingIdx === i);
+
+    if (inEdit) {
+      tr.innerHTML = `
+        <td><input id="edit-nome" class="form-control" value="${p.nome}"></td>
+        <td>
+          <select id="edit-ruolo" class="form-select">
+            ${[
+              "Amministrazione","Staff Cucina","Staff Sala","Staff Lavapiatti","Staff Pulizie","Altro"
+            ].map(opt => `<option ${p.ruolo===opt?"selected":""}>${opt}</option>`).join("")}
+          </select>
+        </td>
+        <td><input id="edit-assunzione" type="date" class="form-control" value="${p.dataAssunzione||""}"></td>
+        <td>
+          <select id="edit-rapporto" class="form-select">
+            ${[
+              "Indeterminato","Determinato","Part-Time","Apprendistato",
+              "Intermittente (a chiamata)","Contratto stagionale",
+              "Somministrazione (agenzia)","Collaborazioni occasionali"
+            ].map(opt => `<option ${p.tipoRapporto===opt?"selected":""}>${opt}</option>`).join("")}
+          </select>
+        </td>
+        <td><input id="edit-fine" type="date" class="form-control" value="${p.dataFine||""}"></td>
+        <td><input id="edit-telefono" class="form-control" value="${p.telefono}"></td>
+        <td><input id="edit-email" class="form-control" value="${p.email}"></td>
+        <td><input id="edit-iban" class="form-control" value="${p.iban}"></td>
+        <td><input id="edit-riposo" class="form-control" value="${p.riposo}"></td>
+        <td class="text-nowrap">
+          <button class="btn btn-sm btn-success me-1" onclick="salvaModifica(${i})" title="Salva"><i class="bi bi-check-lg"></i></button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="editingIdx=null; visualizza();" title="Annulla"><i class="bi bi-x-lg"></i></button>
+        </td>
+      `;
+    } else {
+      tr.innerHTML = `
+        <td>${p.nome}</td>
+        <td>${p.ruolo}</td>
+        <td>${p.dataAssunzione || "-"}</td>
+        <td>${p.tipoRapporto || "-"}</td>
+        <td>${p.dataFine || "-"}</td>
+        <td>${p.telefono || "-"}</td>
+        <td>${p.email || "-"}</td>
+        <td>${p.iban || "-"}</td>
+        <td>${p.riposo || "-"}</td>
+        <td class="text-nowrap">
+          <button class="btn btn-sm btn-outline-primary me-1" onclick="editDipendente(${i})" title="Modifica"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-sm btn-outline-danger" onclick="elimina(${i})" title="Elimina"><i class="bi bi-trash"></i></button>
+        </td>
+      `;
+    }
+
+    tbody.appendChild(tr);
+  });
+}
+
+// ----------------- Scadenze & Email -----------------
+function mostraPopupContrattiScadenza(force=false) {
+  const oggi = new Date(); oggi.setHours(0,0,0,0);
+  const oggiStr = oggi.toISOString().split("T")[0];
+  const fra7 = new Date(oggi); fra7.setDate(fra7.getDate()+7);
+  const fa7  = new Date(oggi); fa7.setDate(fa7.getDate()-7);
+
+  if (!force && localStorage.getItem("popupContrattiData") === oggiStr) return;
+
+  const lista = loadPers();
+  const inSc = lista.filter(d => {
+    if (!d.dataFine) return false;
+    const f = new Date(d.dataFine); f.setHours(0,0,0,0);
+    return f >= fa7 && f <= fra7;
+  });
+
+  if (!inSc.length && !force) return;
+
+  const cont = document.getElementById("contenuto-scadenze");
+  if (cont) {
+    cont.innerHTML = inSc.map(d => {
+      const f = new Date(d.dataFine); f.setHours(0,0,0,0);
+      const bg = f < oggi ? "#ffd6d6" : "#fff8cc";
+      return `<div style="margin-bottom:10px;background:${bg};padding:10px;border-radius:8px;">
+        <strong>${d.nome}</strong> – ${d.ruolo}<br>
+        Assunto il: <strong>${d.dataAssunzione}</strong><br>
+        Fine contratto: <strong>${d.dataFine}</strong>
+      </div>`;
+    }).join("") || "<p>Nessun contratto in scadenza.</p>";
+  }
+
+  const popup = document.getElementById("popup-scadenze");
+  if (popup) popup.style.display = "flex";
+  localStorage.setItem("popupContrattiData", oggiStr);
+}
+
+function inviaEmailContratti() {
+  const elenco = loadPers();
+  if (!elenco.length) { alert("📭 Nessun dipendente."); return; }
+  const righe = elenco.map(p =>
+    `${p.nome} (${p.ruolo}), Assunto il ${p.dataAssunzione}, Fine: ${p.dataFine||"-"}, Rapporto: ${p.tipoRapporto}, Telefono: ${p.telefono||"-"}, Email: ${p.email||"-"}`
+  ).join("\n");
+  window.location.href = `mailto:?subject=Elenco Dipendenti&body=${encodeURIComponent(righe)}`;
+}
+
+function inviaSoloScadenze() {
+  const oggi = new Date(); oggi.setHours(0,0,0,0);
+  const fra7 = new Date(oggi); fra7.setDate(fra7.getDate()+7);
+  const fa7  = new Date(oggi); fa7.setDate(fa7.getDate()-7);
+
+  const inSc = loadPers().filter(p => {
+    if (!p.dataFine) return false;
+    const f = new Date(p.dataFine); f.setHours(0,0,0,0);
+    return f >= fa7 && f <= fra7;
+  });
+
+  if (!inSc.length) { alert("📭 Nessun contratto in scadenza."); return; }
+
+  const righe = inSc.map(p =>
+    `• ${p.nome} – ${p.ruolo}\n  Assunto il: ${p.dataAssunzione}\n  Fine: ${p.dataFine}`
+  ).join("\n\n");
+
+  window.location.href = `mailto:?subject=Contratti in scadenza&body=${encodeURIComponent(righe)}`;
+}
+
+// ----------------- Init -----------------
+document.addEventListener("DOMContentLoaded", () => {
+  sincronizzaPersonale();
+  document.getElementById("filtro_ruolo")?.addEventListener("change", visualizza);
+  resetForm();
+  mostraPopupContrattiScadenza();
+  document.getElementById("chiudiPopupBtn")?.addEventListener("click", () => {
+    document.getElementById("popup-scadenze").style.display = "none";
+  });
+});
+</script>
+
+
+{% endblock %}

@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+{% block title %}RistoSmart FM / Rinnovo licenza{% endblock %}
+
+{% block content %}
+<div class="container mt-4" style="max-width:720px;">
+  <div class="card shadow-sm">
+    <div class="card-body">
+
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3 class="mb-0">🔑 Rinnovo licenza</h3>
+        {% if admin_mode %}
+          <a href="{{ url_for('admin_licenses') }}" class="btn btn-sm btn-outline-secondary">← Torna ad Admin</a>
+        {% endif %}
+      </div>
+
+      {% if success %}
+        <div class="alert alert-success">
+          ✅ Rinnovo completato. La licenza <strong>{{ key }}</strong> ora scade il <strong>{{ new_exp }}</strong>.
+        </div>
+        <a href="{{ url_for('admin_licenses') }}" class="btn btn-primary">Torna a Licenze</a>
+        <a href="{{ url_for('home') }}" class="btn btn-outline-secondary ms-2">Dashboard</a>
+
+      {% else %}
+
+        {% if error %}
+          <div class="alert alert-danger">{{ error }}</div>
+        {% endif %}
+
+        {% if token_valid or admin_mode %}
+          <div class="mb-3">
+            {% if intestatario %}<div><strong>Intestatario:</strong> {{ intestatario }}</div>{% endif %}
+            {% if email %}<div><strong>Email:</strong> {{ email }}</div>{% endif %}
+            {% if scadenza %}<div><strong>Scadenza attuale:</strong> {{ scadenza }}</div>{% endif %}
+            {% if stato %}<div><strong>Stato:</strong> {{ stato }}</div>{% endif %}
+          </div>
+
+          <form method="post" action="{{ admin_mode and url_for('admin_renew_post', key=key) or url_for('renew_post') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            {% if token %}
+              <input type="hidden" name="token" value="{{ token }}">
+            {% endif %}
+
+            {% if admin_mode %}
+              <div class="mb-3">
+                <label class="form-label">Conferma email titolare</label>
+                <input class="form-control" name="email" value="{{ email or '' }}" required>
+              </div>
+            {% endif %}
+
+            <label class="form-label">Durata rinnovo</label>
+            <div class="d-flex gap-3 mb-3">
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="months" id="m1" value="1" checked>
+                <label class="form-check-label" for="m1">1 mese</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="months" id="m12" value="12">
+                <label class="form-check-label" for="m12">12 mesi</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="months" id="m24" value="24">
+                <label class="form-check-label" for="m24">24 mesi</label>
+              </div>
+            </div>
+
+            <p class="text-muted small mb-3">
+              Il rinnovo estende la scadenza dalla data più lontana tra <em>oggi</em> e <em>scadenza attuale</em>.
+            </p>
+
+            <button class="btn btn-success">Rinnova licenza</button>
+            <a href="{{ url_for('admin_licenses') }}" class="btn btn-link">Annulla</a>
+          </form>
+
+        {% else %}
+          <p class="mb-3">Link non valido o scaduto. Richiedi un nuovo link di rinnovo.</p>
+          <a href="{{ url_for('home') }}" class="btn btn-outline-secondary">Dashboard</a>
+        {% endif %}
+
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Privacy & Sicurezza - RistoSmart FM{% endblock %}
+{% block content %}
+
+<div class="container-fluid mt-4">
+  <div class="box-sezione">
+    <h2>🔒 Privacy & Sicurezza dei tuoi dati</h2>
+    <p><strong>La tua privacy non è una funzionalità. È un diritto.</strong></p>
+
+    <h3>Perché RistoSmartFM è sicuro al 1000‰?</h3>
+    <ul>
+      <li>✅ I tuoi dati sono salvati <strong>solo sul tuo computer</strong>, in un file locale: <code>ristosmart.db</code>.</li>
+      <li>✅ Nessun server esterno li vede, li memorizza o li trasmette.</li>
+      <li>✅ Ogni dipendente, fattura, incasso, cliente è visibile <strong>solo a te</strong>. Nessun altro può accedervi.</li>
+      <li>✅ Il sistema è multi-tenant: anche se usi lo stesso PC di un collega, i suoi dati sono isolati dai tuoi.</li>
+      <li>✅ Non usiamo cookie di tracciamento, né analytics, né pubblicità.</li>
+      <li>✅ Puoi fare backup del tuo file `.db` quando vuoi — è tuo, e solo tuo.</li>
+    </ul>
+
+    <h3>Cosa NON fa RistoSmartFM:</h3>
+    <ul>
+      <li>❌ Non invia mai i tuoi dati su Internet.</li>
+      <li>❌ Non ti chiede mai username/password per un cloud.</li>
+      <li>❌ Non condivide mai informazioni con terze parti.</li>
+    </ul>
+
+    <p style="font-weight:bold; color:#0d6efd;">
+      RistoSmartFM non è un servizio cloud. È il tuo gestionale locale.  
+      La tua sicurezza è la nostra priorità.
+    </p>
+
+    <hr>
+    <p><small>Ultimo aggiornamento: {{ datetime.now().strftime('%d/%m/%Y') }}</small></p>
+  </div>
+</div>
+
+{% endblock %}

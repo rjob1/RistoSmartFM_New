@@ -1,0 +1,918 @@
+{% extends 'base.html' %}
+
+{% block title %}RistoSmart FM / Mese: {{ mese|capitalize }}{% endblock %}
+
+{% block head %}
+
+<style>
+.mese-container .card {
+  margin-bottom: 1rem;
+}
+</style>
+
+<style>
+  :root{
+    --blue:#003366; --blue2:#005599; --gold:#ffd633; --muted:#f3f6fa;
+  }
+
+  /* larghezza ottimale e centratura per 23" + responsive */
+  .mese-container{max-width:1400px;margin:0 auto;}
+
+  /* strip mesi più compatta e leggibile */
+  .month-strip .btn{padding:.35rem .6rem;border-radius:10px}
+  .month-strip .btn-warning{box-shadow:0 0 0 2px rgba(255,214,51,.35) inset}
+
+  /* card uniformi, ombra lieve */
+  .mese-container .card{
+    border:1px solid #dfe6ee;border-radius:14px;
+    box-shadow:0 6px 16px rgba(0,0,0,.05);
+  }
+
+  /* KPI in alto (media, incasso, spese, ricavo) */
+  .row.g-2.mb-3.text-center .card{
+    background:linear-gradient(180deg,#fff,#fafcff);
+    padding:12px 14px;
+  }
+  .row.g-2.mb-3.text-center .card span{
+    display:block;font-weight:700;font-size:1.1rem;color:#16324a;margin-top:4px;
+  }
+
+  /* griglia giorni: input allineati e più leggibili */
+  .days-section .card{padding:8px;border-radius:10px}
+  .days-section small{color:#335}
+
+  /* centra valori e placeholder dei campi Giorno */
+  .days-section input.form-control.form-control-sm.importo {
+    text-align: center !important;
+  }
+  .days-section input.form-control.form-control-sm.importo::placeholder {
+    text-align: center;
+  }
+
+  .days-section .form-control{
+    height:36px;border-radius:10px;border:1px solid #ccd8e6;
+  }
+  .days-section .form-control:focus{
+    border-color:var(--blue2);box-shadow:0 0 0 3px rgba(0,85,153,.12);
+  }
+
+  /* colonne Spese Mensili: righe voce più ordinate */
+  .spese-importo{max-width:180px}
+  .mese-container .d-flex.justify-content-between.align-items-center.my-2{
+    gap:12px;
+  }
+  .mese-container h5{color:var(--blue);font-weight:700}
+
+  /* pannelli riepilogo settimanali e totali: coerenza visiva */
+  .row.g-2.mb-4.text-center .card,
+  .row.g-2.mt-4.text-center .card{
+    background:#fff;
+  }
+  .row.g-2.mt-4.text-center .card span{
+    display:block;font-weight:700;font-size:1.05rem;color:#0f2a44;margin-top:4px;
+  }
+  .row.g-2.mt-4.text-center .card small{color:#678}
+
+  /* spaziature globali */
+  .mese-container h2{color:var(--blue);font-weight:700;margin:10px 0 18px}
+  .mese-container h3{color:var(--blue);font-weight:700;margin:12px 0}
+
+  /* responsive: mantieni lettura chiara su portatili */
+  @media (min-width: 1200px){
+    /* stringi i box Giorno: 8 colonne per riga su desktop */
+    .days-section .col{
+      flex: 0 0 12.5% !important;
+      max-width: 12.5% !important;
+    }
+  }
+
+  @media (max-width:1200px){
+    .mese-container{max-width:100%;padding:0 10px}
+    .spese-importo{max-width:160px}
+  }
+  @media (max-width:768px){
+    .spese-importo{max-width:140px}
+    .row.g-2.mb-3.text-center .card span{font-size:1rem}
+  }
+</style>
+
+<style>
+  /* CENTRA davvero i campi dei giorni: forza l'override di Bootstrap */
+  .days-section .form-control {
+    text-align: center !important;
+  }
+</style>
+
+<style>
+  /* Allinea tutte le celle degli importi sulla destra della colonna */
+  .mese-container .d-flex.justify-content-between.align-items-center.my-2 {
+    justify-content: flex-end !important;  /* spinge tutto a destra */
+    gap: 10px;                             /* piccolo spazio uniforme */
+  }
+
+  /* Mantieni le etichette allineate a sinistra */
+  .mese-container .d-flex.justify-content-between.align-items-center.my-2 span:first-child {
+    flex: 1;                 /* occupa spazio a sinistra */
+    text-align: left;
+  }
+
+  /* Input + percentuale restano sulla destra */
+  .mese-container .spese-importo {
+    width: 120px;            /* larghezza fissa, rende la colonna dritta */
+  }
+</style>
+
+<style>
+  /* Rendi ogni riga (label, input, %) una griglia: colonna destra allineata */
+  .mese-container .card .d-flex.justify-content-between.align-items-center.my-2{
+    display: grid !important;
+    grid-template-columns: 1fr 160px 42px;  /* label | input | %  */
+    align-items: center;
+    column-gap: 12px;
+  }
+
+  /* Fissa davvero la larghezza degli input importo (override della .w-50 di Bootstrap) */
+  .mese-container .card .spese-importo,
+  .mese-container .card .spese-importo.w-50{
+    width: 160px !important;
+    max-width: 160px !important;
+  }
+
+  /* Percentuale allineata perfettamente a destra */
+  .mese-container .card span[id^="percentuale-"]{
+    text-align: right;
+    justify-self: end;
+    min-width: 42px; /* stabilizza la colonna % */
+  }
+</style>
+
+<style>
+  /* Etichetta sempre a sinistra */
+  .mese-container .d-flex.justify-content-between.align-items-center.my-2 span:first-child {
+    flex: 1 1 auto;
+    text-align: left;
+  }
+
+  /* Input importo: colonna fissa a destra */
+  .mese-container .d-flex.justify-content-between.align-items-center.my-2 .spese-importo {
+    flex: 0 0 160px !important;
+    max-width: 160px !important;
+    text-align: right;
+  }
+
+  /* Percentuale: colonna fissa a destra dell'input */
+  .mese-container .d-flex.justify-content-between.align-items-center.my-2 span[id^="percentuale-"] {
+    flex: 0 0 42px;
+    text-align: right;
+  }
+</style>
+
+<style>
+  @media (max-width: 1200px){
+    .mese-container .card .spese-importo{ width:140px !important; max-width:140px !important; }
+    .mese-container .card span[id^="percentuale-"]{ flex:0 0 48px; } /* (se serve un filo più largo) */
+  }
+</style>
+
+<style>
+/* --- MOBILE: input adattivi nei pannelli spese --- */
+@media (max-width: 768px) {
+  .mese-container .card {
+    padding: 1rem !important;
+  }
+
+  .mese-container .d-flex.align-items-center.my-2 {
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 8px !important;
+  }
+
+  /* Label: almeno il 40% dello spazio */
+  .mese-container .d-flex.align-items-center.my-2 span:first-child {
+    flex: 1 1 40%;
+    text-align: left !important;
+    font-size: 0.9rem;
+  }
+
+  /* Input: flessibile, minimo 100px */
+  .mese-container .card .spese-importo,
+  .mese-container .card .spese-importo.w-50 {
+    width: 100px !important;
+    max-width: 120px !important;
+    font-size: 0.875rem;
+    padding: 0.25rem 0.5rem !important;
+  }
+
+  /* Percentuale: più piccola */
+  .mese-container .card span[id^="percentuale-"] {
+    flex: 0 0 36px !important;
+    font-size: 0.8rem;
+  }
+}
+</style>
+
+{% endblock %}
+
+{% block content %}
+
+<div class="mese-container container-fluid">
+
+  <!-- HEADER MESE: strip mesi -->
+  {% set mesi_it = ["gennaio","febbraio","marzo","aprile","maggio","giugno","luglio","agosto","settembre","ottobre","novembre","dicembre"] %}
+  <nav class="month-strip d-flex justify-content-center flex-wrap my-3">
+    {% for m in mesi_it %}
+      <a href="{{ url_for('mese_html', anno=anno, mese=m) }}"
+         class="btn btn-sm mx-1 {% if m == mese|lower %}btn-warning fw-bold{% else %}btn-primary{% endif %}">
+        {{ m|capitalize }}
+      </a>
+    {% endfor %}
+  </nav>
+
+  <!-- Titolo mese -->
+  <h2 class="text-center text-primary mb-4">{{ mese|capitalize }} / Giorni {{ giorni }}</h2> 
+
+  <!-- BOX riepilogo incassi -->
+  <div class="row g-2 mb-3 text-center">
+    <div class="col-md-3 col-6"><div class="card p-2">Media settimanale <br><span id="media-settimanale">{{ (tot_incassi / (giorni/7)) | round(2) if tot_incassi else "0,00" }}</span></div></div>
+    <div class="col-md-3 col-6"><div class="card p-2">Incasso mensile <br><span id="incasso-mensile">{{ tot_incassi | round(2) }}</span></div></div>
+    <div class="col-md-3 col-6"><div class="card p-2">Spese mensili <br><span id="spese-mensili">{{ tot_spese | round(2) }}</span></div></div>
+    <div class="col-md-3 col-6"><div class="card p-2">Ricavo mensile <br><span id="ricavo-mensile">{{ ricavo | round(2) }}</span></div></div>
+  </div>
+
+  <!-- INPUT incassi giornalieri -->
+  <div class="days-section row row-cols-2 row-cols-md-6 g-2 mb-4">
+    {% for giorno in range(1, giorni+1) %}
+      <div class="col">
+        <div class="card p-2 text-center">
+          <small>Giorno {{ giorno }}</small>
+          <input type="text"
+                class="form-control form-control-sm importo mt-1 text-center"
+                style="text-align:center"
+                data-incasso="1"
+                inputmode="decimal"
+                pattern="[0-9.,]*"
+                id="{{ mese }}_giorno{{ giorno }}"
+                value="{{ incassi.get(giorno, '') | round(2) if incassi.get(giorno) is not none else '' }}"
+                placeholder="0,00">
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <!-- INCASSI SETTIMANALI -->
+  <div class="row g-2 mb-4 text-center">
+    {% for i in range(1,6) %}
+      <div class="col"><div class="card p-2">Incasso {{ i }}ª settimana<br><span id="settimana{{ i }}">0,00</span></div></div>
+    {% endfor %}
+  </div>
+
+  <hr class="my-4">
+
+  <!-- SEZIONE SPESE MENSILI -->
+  <h3 class="text-center mb-3 text-primary">Spese Mensili</h3>
+  <div class="row g-3">
+    <!-- Canone - Mutuo - Finanziamenti -->
+    <div class="col-12 col-md-4">
+      <div class="card p-3 h-100">
+        <h5>Canone - Mutuo - Finanziamenti</h5>
+        {% for id, label in [
+          ('canone','Canone mensile e/o mutuo'),
+          ('finanziamento1','Finanziamento 1'),
+          ('finanziamento2','Finanziamento 2'),
+          ('finanziamento-altro','Altro')
+        ] %}
+        <div class="d-flex align-items-center my-2" style="justify-content:flex-start;column-gap:12px;">
+          <span style="flex:1 1 auto;text-align:left;">{{ label }}</span>
+          <input type="text" id="{{ id }}" class="form-control form-control-sm spese-importo text-end"
+                style="width:160px"
+                value="{{ spese.get(id, '') | round(2) if spese.get(id) is not none else '' }}"
+                placeholder="0,00">
+          <span id="percentuale-{{ id }}" class="ms-2" style="flex:0 0 42px;text-align:right;">0%</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Stipendi personale -->
+    <div class="col-12 col-md-4">
+      <div class="card p-3 h-100">
+        <h5>Stipendi personale</h5>
+        {% for id, label in [
+          ('amministrazione','Amministrazione'),
+          ('staff-cucina','Staff Cucina'),
+          ('staff-sala','Staff Sala'),
+          ('staff-lavapiatti','Staff Lavapiatti'),
+          ('staff-pulizie','Staff Pulizie'),
+          ('altro','Altro')
+        ] %}
+        <div class="d-flex align-items-center my-2" style="justify-content:flex-start;column-gap:12px;">
+          <span style="flex:1 1 auto;text-align:left;">{{ label }}</span>
+          <input type="text" id="{{ id }}" class="form-control form-control-sm spese-importo text-end"
+                style="width:160px"
+                value="{{ spese.get(id, '') | round(2) if spese.get(id) is not none else '' }}"
+                placeholder="0,00" readonly>
+          <span id="percentuale-{{ id }}" class="ms-2" style="flex:0 0 42px;text-align:right;">0%</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Spese Fatture -->
+    <div class="col-12 col-md-4">
+      <div class="card p-3 h-100">
+        <h5>Spese Fatture</h5>
+        {% for id, label in [
+          ('alimentari','Alimentari (Food Cost)'),
+          ('bevande','Bevande'),
+          ('utilita','Utilità (Luce, acqua, gas)'),
+          ('manutenzioni','Manutenzioni e riparazioni'),
+          ('marketing','Marketing e pubblicità'),
+          ('licenze','Licenze e assicurazioni'),
+          ('commissioni','Commissioni (The Fork)'),
+          ('lavanderia','Lavanderia'),
+          ('pulizia','Pulizia e igiene'),
+          ('spese-varie','Spese Varie'),
+          ('varie','Varie')
+        ] %}
+        <div class="d-flex align-items-center my-2" style="justify-content:flex-start;column-gap:12px;">
+          <span style="flex:1 1 auto;text-align:left;">{{ label }}</span>
+          <input type="text" id="{{ id }}" class="form-control form-control-sm spese-importo text-end"
+                style="width:160px"
+                value="{{ spese.get(id, '') | round(2) if spese.get(id) is not none else '' }}"
+                placeholder="0,00" readonly>
+          <span id="percentuale-{{ id }}" class="ms-2" style="flex:0 0 42px;text-align:right;">0%</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- BOX riepilogo finali -->
+  <div class="row g-2 mt-4 text-center">
+  <div class="col-md-3 col-6">
+    <div class="card p-2">
+      Spese Fisse<br>
+      <span id="totale-spese-fisse">0,00</span><br>
+      <small id="percentuale-spese-fisse">0%</small>
+    </div>
+  </div>
+  <div class="col-md-3 col-6">
+    <div class="card p-2">
+      Stipendi<br>
+      <span id="totale-stipendi">0,00</span><br>
+      <small id="percentuale-stipendi">0%</small>
+    </div>
+  </div>
+  <div class="col-md-3 col-6">
+    <div class="card p-2">
+      Spese Fatture<br>
+      <span id="totale-spese-fatture">0,00</span><br>
+      <small id="percentuale-spese-fatture">0%</small>
+    </div>
+  </div>
+  <div class="col-md-3 col-6">
+    <div class="card p-2">
+      Totale Spese<br>
+      <span id="totale-spese">{{ tot_spese | round(2) }}</span><br>
+      <small id="percentuale-totale-spese">0%</small>
+    </div>
+  </div>
+</div>
+
+<p class="text-muted small mt-2 text-center">
+  Le percentuali sono calcolate sull’incasso mensile.
+</p>
+
+  <div id="aggiornamento-msg" class="alert alert-success mt-3 d-none">
+    Totali aggiornati ✔
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+
+<script>
+  const MESE_CORRENTE = "{{ mese }}";
+  const ANNO = {{ anno }};
+  const GIORNI = {{ giorni }};
+  window.CSRF_TOKEN = "{{ csrf_token }}";   // ✅ aggiunta: token disponibile per fetch
+</script>
+
+<script>
+// FIX mese.html <2025-09-02> – parsing/formatting euro robusto + calcoli live affidabili
+
+// --- Parsing euro: identifica L’ULTIMO separatore (',' o '.') come decimale.
+// Esempi gestiti:
+//  "1254.30"   → 1254.30
+//  "1.254,30"  → 1254.30
+//  "1,254.30"  → 1254.30
+//  "1.254.300" → 1254300
+// Sostituisci TUTTA la tua parseEuro con questa
+function parseEuro(raw) {
+  if (raw == null) return 0;
+  let s = String(raw).trim().replace(/\s+/g, '');
+  if (!s) return 0;
+
+  const hasComma = s.includes(',');
+  const hasDot   = s.includes('.');
+
+  // Caso 1: presenti SIA ',' che '.'
+  // L'ULTIMO separatore visto è il decimale, gli altri sono migliaia.
+  if (hasComma && hasDot) {
+    const lastComma = s.lastIndexOf(',');
+    const lastDot   = s.lastIndexOf('.');
+    const lastSep   = Math.max(lastComma, lastDot);
+    const intPart   = s.slice(0, lastSep).replace(/[^\d]/g, '');
+    const fracPart  = s.slice(lastSep + 1).replace(/[^\d]/g, '');
+    const clean     = intPart + (fracPart ? '.' + fracPart : '');
+    const num       = parseFloat(clean);
+    return isNaN(num) ? 0 : num;
+  }
+
+  // Caso 2: solo uno dei due separatori
+  if (hasComma || hasDot) {
+    const sep = hasComma ? ',' : '.';
+    const parts = s.split(sep);
+
+    if (parts.length === 2) {
+      // x,yy oppure x.yy → trattiamo come decimale
+      const intPart  = parts[0].replace(/[^\d]/g, '');
+      const fracPart = parts[1].replace(/[^\d]/g, '');
+      const clean    = intPart + (fracPart ? '.' + fracPart : '');
+      const num      = parseFloat(clean);
+      return isNaN(num) ? 0 : num;
+    } else {
+      // Più di un separatore uguale: probabilmente tutti migliaia (es. 1.254.300)
+      // → rimuovi tutto e interpreta come intero
+      const cleanInt = s.replace(/[^\d]/g, '');
+      const num = parseFloat(cleanInt);
+      return isNaN(num) ? 0 : num;
+    }
+  }
+
+  // Caso 3: solo cifre
+  const digits = s.replace(/[^\d]/g, '');
+  const num = parseFloat(digits);
+  return isNaN(num) ? 0 : num;
+}
+
+
+// --- Formatting euro: sempre it-IT con due decimali
+function formatEuro(val) {
+  const n = Number.isFinite(val) ? val : parseFloat(val) || 0;
+  return n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// % per ogni VOCE di spesa rispetto all'Incasso mensile
+function aggiornaPercentualiVoci(totIncassi){
+  // evita NaN e divisione per zero
+  const base = (Number(totIncassi)||0);
+  const fmtP = v => base>0 ? Math.round((v/base)*100)+'%' : '0%';
+
+  const idsFisse = ['canone','finanziamento1','finanziamento2','finanziamento-altro'];
+  const idsStip  = ['amministrazione','staff-cucina','staff-sala','staff-lavapiatti','staff-pulizie','altro'];
+  const idsFat   = ['alimentari','bevande','utilita','manutenzioni','marketing','licenze','commissioni','lavanderia','pulizia','spese-varie','varie'];
+
+  [...idsFisse, ...idsStip, ...idsFat].forEach(id=>{
+    const inp = document.getElementById(id);
+    const span = document.getElementById(`percentuale-${id}`);
+    if (!inp || !span) return;
+    const val = parseEuro(inp.value);
+    span.textContent = fmtP(val);
+  });
+}
+
+// ===== FIX coerenza: totale incassi = somma settimane =====
+function round2(x){ return Math.round((Number(x)||0)*100)/100; }
+
+// Calcola e MOSTRA le 5 settimane, restituendo l’array delle somme
+function calcolaIncassiSettimanali(returnSums = true) {
+  const buckets = [[],[],[],[],[]]; // 1-7, 8-14, 15-21, 22-28, 29-31
+  for (let g=1; g<=GIORNI; g++) {
+    const idx = Math.min(4, Math.floor((g-1)/7));
+    buckets[idx].push(g);
+  }
+  const sums = buckets.map(giorni => {
+    let s = 0;
+    for (const g of giorni) {
+      const el = document.getElementById(`${MESE_CORRENTE}_giorno${g}`);
+      if (el) s += parseEuro(el.value);
+    }
+    return round2(s);
+  });
+  for (let i=0;i<5;i++){
+    const span = document.getElementById(`settimana${i+1}`);
+    if (span) span.textContent = formatEuro(sums[i]);
+  }
+  return returnSums ? sums : undefined;
+}
+
+// KPI & riepilogo: usa la SOMMA DELLE SETTIMANE come fonte unica
+function recalcTotals() {
+  const weekSums   = calcolaIncassiSettimanali(true);
+  const totIncassi = round2(weekSums.reduce((a,b)=>a+b,0));
+  const mediaSett  = (GIORNI>0) ? round2(totIncassi / (GIORNI/7)) : 0;
+  aggiornaPercentualiVoci(totIncassi);
+
+  // Spese
+  let speseFisse = 0, stipendi = 0, fatture = 0;
+  ['canone','finanziamento1','finanziamento2','finanziamento-altro'].forEach(id=>{
+    const el=document.getElementById(id); if(el) speseFisse += parseEuro(el.value);
+  });
+  ['amministrazione','staff-cucina','staff-sala','staff-lavapiatti','staff-pulizie','altro'].forEach(id=>{
+    const el=document.getElementById(id); if(el) stipendi += parseEuro(el.value);
+  });
+  ['alimentari','bevande','utilita','manutenzioni','marketing','licenze','commissioni','lavanderia','pulizia','spese-varie','varie'].forEach(id=>{
+    const el=document.getElementById(id); if(el) fatture += parseEuro(el.value);
+  });
+
+  speseFisse = round2(speseFisse);
+  stipendi   = round2(stipendi);
+  fatture    = round2(fatture);
+
+  const totSpese = round2(speseFisse + stipendi + fatture);
+  const ricavo   = round2(totIncassi - totSpese);
+
+  const setTxt=(id,v)=>{ const n=document.getElementById(id); if(n) n.textContent = formatEuro(v); };
+  setTxt('incasso-mensile', totIncassi);
+  setTxt('media-settimanale', mediaSett);
+  setTxt('spese-mensili', totSpese);
+  setTxt('ricavo-mensile', ricavo);
+
+  setTxt('totale-spese-fisse', speseFisse);
+  setTxt('totale-stipendi',    stipendi);
+  setTxt('totale-spese-fatture', fatture);
+  setTxt('totale-spese',       totSpese);
+
+  // invece di Math.round(...)
+  const pIncasso = (x) => totIncassi > 0 ? ((x / totIncassi) * 100).toFixed(1) + '%' : '0%';
+
+  const psf = document.getElementById('percentuale-spese-fisse');    if (psf)  psf.textContent = pIncasso(speseFisse);
+  const pst = document.getElementById('percentuale-stipendi');       if (pst)  pst.textContent = pIncasso(stipendi);
+  const psf2= document.getElementById('percentuale-spese-fatture');  if (psf2) psf2.textContent = pIncasso(fatture);
+  const ptot= document.getElementById('percentuale-totale-spese');   if (ptot) ptot.textContent = pIncasso(totSpese);
+}
+
+// --- Debounce leggero per input
+function debounce(fn, t=120){ let h; return (...a)=>{ clearTimeout(h); h=setTimeout(()=>fn.apply(null,a),t); }; }
+
+// --- Bind eventi
+document.addEventListener('DOMContentLoaded', () => {
+  ripristinaStatoMese();
+  const inputs = document.querySelectorAll('.importo, .spese-importo');
+
+  // Inizializza: normalizza visualizzazione senza alterare i dati durante la digitazione
+  inputs.forEach(inp => {
+    // Se il server ha messo valori come "1234.5", li formattiamo una volta
+    if (inp.value && /\d/.test(inp.value)) {
+      const num = parseEuro(inp.value);
+      inp.value = num ? formatEuro(num) : '';
+    }
+
+    // Su blur/Enter → formatta + ricalcola (niente format su input per evitare duplicazioni caret)
+    const formatAndRecalc = () => {
+      const num = parseEuro(inp.value);
+      inp.value = num ? formatEuro(num) : (inp.value.trim() ? formatEuro(0) : '');
+      recalcTotals();
+    };
+    inp.addEventListener('blur', formatAndRecalc);
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
+
+    // Su input → solo ricalcolo (debounced), nessun format live
+    inp.addEventListener('input', debounce(recalcTotals, 120));
+    inp.addEventListener('change', recalcTotals);
+  });
+
+  // Primo calcolo
+  recalcTotals();
+});
+</script>
+
+<script>
+// === VALIDATORE COERENZA SOMME ===
+// Da incollare DOPO recalcTotals(), e poi richiamato in fondo a recalcTotals().
+
+function ensureAlertBanner() {
+  let el = document.getElementById('validazione-msg');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'validazione-msg';
+    el.className = 'alert alert-danger mt-3 d-none';
+    el.style.fontWeight = '600';
+    el.style.border = '1px solid #dc3545';
+    el.style.borderRadius = '10px';
+    el.style.boxShadow = '0 6px 16px rgba(220,53,69,.15)';
+    // Inserisci il banner subito sotto i box KPI al top
+    const cont = document.querySelector('.mese-container');
+    const anchor = cont?.querySelector('.row.g-2.mb-3.text-center');
+    (anchor?.parentNode || document.body).insertBefore(el, anchor?.nextSibling || null);
+  }
+  return el;
+}
+
+function showValidation(message) {
+  const el = ensureAlertBanner();
+  el.textContent = message;
+  el.classList.remove('d-none','alert-success');
+  el.classList.add('alert-danger');
+}
+
+function hideValidation() {
+  const el = document.getElementById('validazione-msg');
+  if (el) el.classList.add('d-none');
+}
+
+function round2(x){ return Math.round((Number(x)||0)*100)/100; }
+
+function validateConsistenza() {
+  hideValidation();
+
+  // 1) Incassi: somma settimane vs incasso mensile
+  const weekSums = calcolaIncassiSettimanali(true);
+  const sommaSettimane = round2(weekSums.reduce((a,b)=>a+b,0));
+  const incassoMensile = round2(parseEuro(document.getElementById('incasso-mensile')?.textContent || '0'));
+
+  // 2) Spese: fisse + stipendi + fatture vs totale spese
+  const speseFisse = round2(parseEuro(document.getElementById('totale-spese-fisse')?.textContent || '0'));
+  const stipendi   = round2(parseEuro(document.getElementById('totale-stipendi')?.textContent || '0'));
+  const fatture    = round2(parseEuro(document.getElementById('totale-spese-fatture')?.textContent || '0'));
+  const sommaSpese = round2(speseFisse + stipendi + fatture);
+  const totaleSpese= round2(parseEuro(document.getElementById('totale-spese')?.textContent || '0'));
+  const speseMensiliBox = round2(parseEuro(document.getElementById('spese-mensili')?.textContent || '0'));
+
+  const err = [];
+
+  if (Math.abs(sommaSettimane - incassoMensile) > 0.01) {
+    err.push(`Incassi non coerenti: Somma settimane ${formatEuro(sommaSettimane)} ≠ Incasso mensile ${formatEuro(incassoMensile)}.`);
+  }
+  if (Math.abs(sommaSpese - totaleSpese) > 0.01) {
+    err.push(`Totale Spese non coerente: Fisse+Stipendi+Fatture ${formatEuro(sommaSpese)} ≠ Totale Spese ${formatEuro(totaleSpese)}.`);
+  }
+  if (Math.abs(sommaSpese - speseMensiliBox) > 0.01) {
+    err.push(`Box "Spese mensili" ${formatEuro(speseMensiliBox)} ≠ Somma Spese ${formatEuro(sommaSpese)}.`);
+  }
+
+  if (err.length) {
+    showValidation(err.join('  '));
+  } else {
+    hideValidation();
+  }
+}
+
+// ✅ Richiama il validatore a ogni ricalcolo
+const __oldRecalcTotals = recalcTotals;
+recalcTotals = function() {
+  __oldRecalcTotals();
+  validateConsistenza();
+};
+
+// Inizializza la prima validazione dopo il DOM ready corrente
+document.addEventListener('DOMContentLoaded', () => {
+  validateConsistenza();
+});
+</script>
+
+<script>
+// FIX mese.html <autosave LS> — salvataggio/ripristino locale dei campi
+const LS_KEY_MESE = `RSFM_MESE_${ANNO}_${MESE_CORRENTE.toLowerCase()}`;
+
+function __allMoneyInputs() {
+  const a = Array.from(document.querySelectorAll('.importo, .spese-importo'));
+  return a.filter(el => el instanceof HTMLInputElement);
+}
+
+function salvaStatoMese() {
+  const data = { incassi:{}, spese:{} };
+  document.querySelectorAll('[data-incasso="1"]').forEach(el => {
+    data.incassi[el.id] = String(parseEuro(el.value) || 0);
+  });
+  document.querySelectorAll('.spese-importo').forEach(el => {
+    data.spese[el.id] = String(parseEuro(el.value) || 0);
+  });
+  localStorage.setItem(LS_KEY_MESE, JSON.stringify(data));
+}
+
+function ripristinaStatoMese() {
+  const raw = localStorage.getItem(LS_KEY_MESE);
+  if (!raw) return;
+  try {
+    const data = JSON.parse(raw);
+    Object.entries(data.incassi || {}).forEach(([id, v]) => {
+      const el = document.getElementById(id);
+      if (el) el.value = formatEuro(parseFloat(v) || 0);
+    });
+    Object.entries(data.spese || {}).forEach(([id, v]) => {
+      const el = document.getElementById(id);
+      if (el) el.value = formatEuro(parseFloat(v) || 0);
+    });
+  } catch(e){ console.warn('Ripristino mese: JSON invalido', e); }
+}
+
+// ⬇️ NIENTE DOMContentLoaded QUI.
+// Salviamo su input/blur/change e prima di uscire:
+(function initAutosave(){
+  const saveDebounced = (function(){ let t; return ()=>{ clearTimeout(t); t=setTimeout(salvaStatoMese,120); }; })();
+
+  document.addEventListener('input', e => {
+    if (e.target.matches('.importo, .spese-importo')) saveDebounced();
+  });
+  document.addEventListener('change', e => {
+    if (e.target.matches('.importo, .spese-importo')) salvaStatoMese();
+  });
+  document.addEventListener('blur', e => {
+    if (e.target.matches('.importo, .spese-importo')) salvaStatoMese();
+  }, true);
+
+  window.addEventListener('beforeunload', salvaStatoMese);
+})();
+
+// Anti-autofill (facoltativo)
+document.addEventListener('DOMContentLoaded', ()=>{
+  __allMoneyInputs().forEach(i => i.setAttribute('autocomplete','off'));
+});
+</script>
+
+<script>
+// --- Salvataggio automatico su DB ---
+// Ogni volta che un campo incasso o spesa cambia, invia subito al backend.
+
+async function salvaSuDB(tipo, payload) {
+  try {
+    const url = tipo === "incasso" ? "/api/salva-incasso" : "/api/salva-spesa";
+    const r = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": window.CSRF_TOKEN   // ✅ aggiunto token CSRF
+      },
+      credentials: "same-origin",
+      body: JSON.stringify(payload)
+    });
+    if (!r.ok) throw new Error("Errore " + r.status);
+  } catch (err) {
+    console.error("Salvataggio DB fallito:", err);
+    if (window.showToast) showToast("Errore salvataggio DB", "danger");
+  }
+}
+
+
+// Listener automatici
+document.addEventListener("change", e => {
+  const el = e.target;
+  if (el.matches('[data-incasso="1"]')) {
+    // è un campo incasso giornaliero
+    const mm = el.id.match(/_giorno(\d+)$/i);
+    if (!mm) return;
+    const giorno = parseInt(mm[1], 10);
+    const valore = parseEuro(el.value);
+    salvaSuDB("incasso", { anno: ANNO, mese: MESE_CORRENTE.toLowerCase(), giorno, valore });
+  }
+  if (el.matches('.spese-importo')) {
+    // solo le spese fisse vanno nel DB
+    const FIXED = new Set(['canone','finanziamento1','finanziamento2','finanziamento-altro']);
+    const categoria = (el.id || "").trim().toLowerCase();
+    if (!FIXED.has(categoria)) return;
+    const valore = parseEuro(el.value);
+    salvaSuDB("spesa", { anno: ANNO, mese: MESE_CORRENTE.toLowerCase(), categoria, valore });
+  }
+});
+</script>
+
+<script>
+// === CARICA SPESE DA FATTURE DA API + AUTO-UPDATE ===
+let ultimaChiamata = null;
+let pollingInterval = null;
+
+async function caricaSpeseFatture(force = false) {
+  try {
+    const url = new URL(`/api/spese_fatture/${ANNO}/${MESE_CORRENTE.toLowerCase()}`, window.location.origin);
+    if (force) url.searchParams.set("t", Date.now()); // Cache busting
+
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("API error");
+    const data = await response.json();
+
+    const idsFatture = [
+      'alimentari','bevande','utilita','manutenzioni',
+      'marketing','licenze','commissioni','lavanderia',
+      'pulizia','spese-varie','varie'
+    ];
+
+    let totaleFatture = 0;
+    for (const id of idsFatture) {
+      const valore = data[id] || 0;
+      totaleFatture += valore;
+
+      const el = document.getElementById(id);
+      if (el && el.readOnly) {
+        el.value = formatEuro(valore);
+      }
+    }
+
+    recalcTotals();
+    ultimaChiamata = { data, timestamp: Date.now() };
+  } catch (err) {
+    console.warn("Impossibile caricare spese da fatture:", err);
+  }
+}
+
+// Chiamata iniziale
+document.addEventListener('DOMContentLoaded', () => {
+  caricaSpeseFatture();
+  
+  // Avvia polling ogni 30 secondi (solo se la pagina è attiva)
+  pollingInterval = setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      caricaSpeseFatture();
+    }
+  }, 30000); // Ogni 30 secondi
+});
+
+// Ferma il polling quando l'utente lascia la pagina
+window.addEventListener('beforeunload', () => {
+  if (pollingInterval) clearInterval(pollingInterval);
+});
+</script>
+
+<script>
+// === ASCOLTA CAMBIAMENTI DA /fatture ===
+window.addEventListener("storage", (e) => {
+  if (e.key === "fatture_update_trigger") {
+    console.log("[mese] Rilevato cambio fatture → aggiorno riepilogo");
+
+    // Chiamata all'API con cache-busting
+    fetch(`/api/spese_fatture/${ANNO}/${MESE_CORRENTE.toLowerCase()}?t=${Date.now()}`)
+      .then(r => r.json())
+      .then(data => {
+        const idsFatture = [
+          'alimentari','bevande','utilita','manutenzioni',
+          'marketing','licenze','commissioni','lavanderia',
+          'pulizia','spese-varie','varie'
+        ];
+
+        // Aggiorna ogni campo readonly
+        for (const id of idsFatture) {
+          const valore = data[id] || 0;
+          const el = document.getElementById(id);
+          if (el && el.readOnly) {
+            el.value = formatEuro(valore);
+          }
+        }
+
+        // Aggiorna totali e percentuali
+        recalcTotals();
+      })
+      .catch(err => console.warn("Errore aggiornamento spese fatture:", err));
+  }
+});
+
+
+// === CARICA STIPENDI DA PERSONALE ===
+async function caricaStipendiPersonale() {
+  try {
+    const aggregato = JSON.parse(localStorage.getItem('STIPENDI_AGGREGATO') || '{}');
+    const yearKey = String(ANNO);
+    const meseKey = MESE_CORRENTE.toLowerCase();
+    const categorie = [
+      'amministrazione',
+      'staff-cucina',
+      'staff-sala',
+      'staff-lavapiatti',
+      'staff-pulizie',
+      'altro'
+    ];
+
+    const datiAnno = aggregato[yearKey] || {};
+    const datiMese = datiAnno[meseKey] || {};
+
+    let totaleStipendi = 0;
+    for (const cat of categorie) {
+      const valore = parseFloat(datiMese[cat] || 0);
+      totaleStipendi += valore;
+
+      const el = document.getElementById(cat);
+      if (el && el.readOnly) {
+        el.value = formatEuro(valore);
+      }
+    }
+
+    recalcTotals();
+  } catch (err) {
+    console.warn('Impossibile caricare stipendi:', err);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  caricaStipendiPersonale();
+});
+
+window.addEventListener('storage', (event) => {
+  if (event.key === 'stipendi_update_trigger') {
+    caricaStipendiPersonale();
+  }
+});
+</script>
+</script>
+
+
+{% endblock %}

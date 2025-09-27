@@ -1,0 +1,152 @@
+{% extends 'base.html' %}
+
+{% block title %}RistoSmart FM / Home{% endblock %}
+
+{% block content %}
+{% include "_navbar.html" %}
+<style>
+  /* Titoli */
+  .welcome-title {
+    text-align: center;
+    font-size: 2.4rem;
+    font-weight: bold;
+    color: #003366;
+    text-shadow: 1px 1px 3px rgba(0,0,0,0.2);
+    margin-bottom: 10px;
+  }
+  .welcome-year {
+    text-align: center;
+    font-size: 1.8rem;
+    font-weight: 600;
+    color: #005599;
+    margin-bottom: 30px;
+  }
+
+  /* Bottoni mesi */
+  .btn-mese {
+    display: inline-block;
+    width: 160px;
+    margin: 10px;
+    padding: 12px 0;
+    border-radius: 12px;
+    background: #007bff;
+    color: #fff;
+    font-weight: 600;
+    text-decoration: none;
+    font-size: 1.1rem;
+    transition: all 0.3s ease;
+    box-shadow: 0 3px 6px rgba(0,0,0,0.15);
+  }
+  .btn-mese:hover {
+    background: #0056b3;
+    transform: translateY(-3px);
+    box-shadow: 0 5px 12px rgba(0,0,0,0.25);
+    color: #fff;
+  }
+
+  /* Mese attivo */
+  .btn-mese.active {
+    background: linear-gradient(135deg, #ffd633, #ffbf00);
+    color: #003366;
+    font-weight: bold;
+    box-shadow: 0 5px 15px rgba(255, 215, 0, 0.6);
+  }
+
+  /* ⭐ Stellina animata sul mese attivo */
+  .btn-mese.active .star {
+    margin-left: 6px;
+    font-size: 1.2rem;
+    color: #003366; /* Blu scuro */
+    text-shadow: 0 0 8px rgba(0, 51, 102, 0.8);
+    animation: glowStar 2s infinite ease-in-out;
+  }
+  @keyframes glowStar {
+    0%   { text-shadow: 0 0 6px rgba(0,51,102,0.6); opacity: 1; }
+    50%  { text-shadow: 0 0 14px rgba(0,51,102,1); opacity: 0.7; }
+    100% { text-shadow: 0 0 6px rgba(0,51,102,0.6); opacity: 1; }
+  }
+  
+  /* Testo descrittivo e copyright */
+  .text-descriptive, .copyright {
+    margin-top: 40px;
+    text-align: center;
+  }
+  .text-descriptive p {
+    font-size: 1.1rem;
+    line-height: 1.6;
+    color: #003366; /* Blu scuro per armonia */
+  }
+  .copyright p {
+    font-size: 0.9rem;
+    color: #444;
+  }
+
+  /* Responsive */
+  @media (max-width: 992px) {
+    .btn-mese {
+      width: 45%;
+      font-size: 1rem;
+    }
+  }
+  @media (max-width: 576px) {
+    .btn-mese {
+      width: 100%;
+      font-size: 0.95rem;
+    }
+  }
+</style>
+
+<!-- Titolo -->
+<div class="welcome-title">Benvenuto su RistoSmart FM</div>
+<div class="welcome-year">Anno {{ anno }}</div>
+
+<!-- 🔷 MENU DEI MESI (6 sopra + 6 sotto) -->
+<div class="container text-center mt-4">
+  <div class="row justify-content-center">
+    {% for m in mesi[:6] %}
+      <div class="col-md-2 col-4 mb-3">
+        <a href="{{ url_for('mese_html', anno=anno, mese=m) }}"
+           class="btn-mese {% if m == mese_corrente and anno == current_year %}active{% endif %}">
+          {{ m.capitalize() }}
+          {% if m == mese_corrente and anno == current_year %}
+            <span class="star">⭐</span>
+          {% endif %}
+        </a>
+      </div>
+    {% endfor %}
+  </div>
+  <div class="row justify-content-center">
+    {% for m in mesi[6:] %}
+      <div class="col-md-2 col-4 mb-3">
+        <a href="{{ url_for('mese_html', anno=anno, mese=m) }}"
+           class="btn-mese {% if m == mese_corrente and anno == current_year %}active{% endif %}">
+          {{ m.capitalize() }}
+          {% if m == mese_corrente and anno == current_year %}
+            <span class="star">⭐</span>
+          {% endif %}
+        </a>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Descrizione -->
+<div class="text-descriptive">
+  <p>
+    RistoSmart FM è un software gestionale creato per facilitare la gestione economica del tuo ristorante.<br>
+    Compilando correttamente tutte le sezioni del programma, potrai monitorare in tempo reale le tue entrate e uscite,<br>
+    individuare potenziali sprechi e migliorare la redditività del tuo locale.
+  </p>
+</div>
+
+<!-- Copyright -->
+<div class="copyright">
+  <p>
+    Questo gestionale: <strong>RistoSmart FM</strong> è protetto da copyright.<br>
+    È vietata la riproduzione, modifica, distribuzione o utilizzo, totale o parziale,<br>
+    in qualsiasi forma, sia in Excel che in software derivati, senza l'espresso consenso del proprietario.<br>
+    Ogni violazione sarà perseguita ai sensi della legge.<br>
+    Per qualsiasi informazione, contattare: <a href="mailto:foodcostservice@gmail.com">foodcostservice@gmail.com</a>.
+  </p>
+</div>
+{% endblock %}
