@@ -418,7 +418,7 @@ def ensure_indexes():
 
 def ensure_triggers():
     with get_db() as conn:
-        # Inserimento: personale deve esistere e avere stesso user_id
+        # FK logica: personale deve esistere con stesso user_id
         conn.execute("""
         CREATE TRIGGER IF NOT EXISTS sp_fk_personale_uid_ins
         BEFORE INSERT ON stipendi_personale
@@ -430,7 +430,7 @@ def ensure_triggers():
             ) THEN RAISE(ABORT,'FK personale/user mismatch')
           END;
         END;""")
-        # Update di chiave: stessa verifica
+
         conn.execute("""
         CREATE TRIGGER IF NOT EXISTS sp_fk_personale_uid_upd
         BEFORE UPDATE OF personale_id, user_id ON stipendi_personale
@@ -442,8 +442,55 @@ def ensure_triggers():
             ) THEN RAISE(ABORT,'FK personale/user mismatch')
           END;
         END;""")
+
+        # Stato pagamento: mai NULL e solo valori ammessi
+        conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS sp_stato_nonnull_ins
+        BEFORE INSERT ON stipendi_personale
+        BEGIN
+          SELECT CASE
+            WHEN NEW.stato_pagamento IS NULL THEN RAISE(ABORT,'stato_pagamento NULL')
+          END;
+        END;""")
+
+        conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS sp_stato_nonnull_upd
+        BEFORE UPDATE OF stato_pagamento ON stipendi_personale
+        BEGIN
+          SELECT CASE
+            WHEN NEW.stato_pagamento IS NULL THEN RAISE(ABORT,'stato_pagamento NULL')
+          END;
+        END;""")
+
+        conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS sp_stato_valid_ins
+        BEFORE INSERT ON stipendi_personale
+        BEGIN
+          SELECT CASE
+            WHEN NEW.stato_pagamento NOT IN ('pagato','non_pagato')
+              THEN RAISE(ABORT,'stato_pagamento invalido')
+          END;
+        END;""")
+
+        conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS sp_stato_valid_upd
+        BEFORE UPDATE OF stato_pagamento ON stipendi_personale
+        BEGIN
+          SELECT CASE
+            WHEN NEW.stato_pagamento NOT IN ('pagato','non_pagato')
+              THEN RAISE(ABORT,'stato_pagamento invalido')
+          END;
+        END;""")
+
         conn.commit()
-    print("[DB] triggers FK stipendi→personale OK", flush=True)
+
+    print("[DB] triggers FK + stato_pagamento NOT NULL/valid OK", flush=True)
+
+def ensure_data_consistency():
+    with get_db() as conn:
+        conn.execute("UPDATE stipendi_personale SET stato_pagamento='non_pagato' WHERE stato_pagamento IS NULL;")
+        conn.commit()
+    print("[DB] data fix: stato_pagamento NULL -> 'non_pagato'", flush=True)
 
 def init_db():
     """Crea le tabelle se non esistono già (versione multi-tenant)"""
@@ -4233,5 +4280,6 @@ except Exception as e:
 if __name__ == "__main__":
     ensure_indexes()
     ensure_triggers()
+    ensure_data_consistency()   # <-- aggiungi qui
     app.config["PROPAGATE_EXCEPTIONS"] = False
     app.run(debug=False)
