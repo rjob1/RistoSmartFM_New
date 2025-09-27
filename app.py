@@ -2773,9 +2773,9 @@ def api_put_stipendi(personale_id):
             # UPSERT su stipendi_personale
             for m_str, payload in mesi.items():
                 mese = int(m_str)
-                lordo = float(payload.get("lordo") or 0.0)
-                netto = float(payload.get("netto") or 0.0)
-                contributi = float(payload.get("contributi") or 0.0)
+                lordo = max(0.0, float(payload.get("lordo") or 0))
+                netto = max(0.0, float(payload.get("netto") or 0))
+                contributi = max(0.0, float(payload.get("contributi") or 0))
                 pagato = payload.get("pagato")  # True/False/None
                 stato_val = "pagato" if pagato is True else "non_pagato"  # mai NULL
                 totale = lordo if lordo else None
