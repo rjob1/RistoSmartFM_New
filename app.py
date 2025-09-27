@@ -416,6 +416,35 @@ def ensure_indexes():
         conn.commit()
     print("[DB] ux_stipendi_user_pid_anno_mese OK", flush=True)
 
+def ensure_triggers():
+    with get_db() as conn:
+        # Inserimento: personale deve esistere e avere stesso user_id
+        conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS sp_fk_personale_uid_ins
+        BEFORE INSERT ON stipendi_personale
+        BEGIN
+          SELECT CASE
+            WHEN NOT EXISTS (
+              SELECT 1 FROM personale p
+              WHERE p.id = NEW.personale_id AND p.user_id = NEW.user_id
+            ) THEN RAISE(ABORT,'FK personale/user mismatch')
+          END;
+        END;""")
+        # Update di chiave: stessa verifica
+        conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS sp_fk_personale_uid_upd
+        BEFORE UPDATE OF personale_id, user_id ON stipendi_personale
+        BEGIN
+          SELECT CASE
+            WHEN NOT EXISTS (
+              SELECT 1 FROM personale p
+              WHERE p.id = NEW.personale_id AND p.user_id = NEW.user_id
+            ) THEN RAISE(ABORT,'FK personale/user mismatch')
+          END;
+        END;""")
+        conn.commit()
+    print("[DB] triggers FK stipendi→personale OK", flush=True)
+
 def init_db():
     """Crea le tabelle se non esistono già (versione multi-tenant)"""
     with get_db() as conn:
@@ -4203,5 +4232,6 @@ except Exception as e:
 # === MAIN ===
 if __name__ == "__main__":
     ensure_indexes()
+    ensure_triggers()
     app.config["PROPAGATE_EXCEPTIONS"] = False
     app.run(debug=False)
