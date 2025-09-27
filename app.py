@@ -1,16 +1,24 @@
 # === IMPORT UNICI E CORRETTI ===
 import os, csv, smtplib, sqlite3, calendar, base64, json, hmac, hashlib, secrets
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote_plus
 from email.mime.text import MIMEText
 from collections import deque
 from types import SimpleNamespace
 from time import time
 from functools import wraps
+
+# Se usi matplotlib altrove, tieni questa riga PRIMA di qualunque "import matplotlib"
+os.environ.setdefault("MPLBACKEND", "Agg")
+
 from flask import Flask, render_template, jsonify, request, session, redirect, url_for, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
-from utils.crypto import encrypt_data, decrypt_data
+from flask_wtf.csrf import generate_csrf, validate_csrf
+
+from utils.crypto import encrypt_data
+
+OPEN_PATHS = ("/login", "/logout", "/register", "/attiva", "/privacy", "/condizioni", "/heartbeat", "/static/")
 
 MONTH_SLUGS = [
     "gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno",
@@ -77,15 +85,34 @@ app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024  # 2 MB
 app.config["BACKUP_MAX_COUNT"] = int(os.getenv("BACKUP_MAX_COUNT", "15"))     # quanti backup tenere
 app.config["BACKUP_MAX_AGE_DAYS"] = int(os.getenv("BACKUP_MAX_AGE_DAYS", "0"))  # 0 = disattivato; es. 90 per 90 giorni
 
-# Cookie di sessione più sicuri
+# Cookie di sessione (dev su http => niente Secure)
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=not app.debug   # True in produzione, False in dev locale (http)
+    SESSION_COOKIE_SECURE=False,   # <— forza OFF in locale
+    REMEMBER_COOKIE_SECURE=False,  # <— se usi remember-me
 )
 
 # Timeout sessione (auto-logout dopo 8 ore)
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=8)
+
+@app.get("/heartbeat")
+def heartbeat():
+    return jsonify(ok=True, now=datetime.now(timezone.utc).isoformat())
+
+
+# Sostituisci SOLO il valore del cookie in set_csrf_cookie
+@app.after_request
+def set_csrf_cookie(resp):
+    resp.set_cookie(
+        "csrf_token",
+        get_csrf(),            # <- prima era generate_csrf()
+        httponly=False,
+        samesite="Lax",
+        secure=app.config.get("SESSION_COOKIE_SECURE", False),
+        path="/",
+    )
+    return resp
 
 # === DB PATH (CANONICO) ===
 db_path_env = os.getenv("DB_PATH")
@@ -114,7 +141,6 @@ def require_login(f):
             return redirect(url_for("login", next=request.path))
         return f(*args, **kwargs)
     return wrapper
-
 
 def require_license(f):
     @wraps(f)
@@ -159,11 +185,20 @@ def require_admin(f):
 def require_csrf(f):
     @wraps(f)
     def wrapper(*a, **kw):
-        token = (request.headers.get("X-CSRF-Token")
-                 or request.form.get("csrf_token")
-                 or (request.get_json(silent=True) or {}).get("csrf_token") or "")
-        if not validate_csrf(token):
-            return (jsonify({"ok": False, "msg": "CSRF mancante o non valido"}), 400)
+        token = (
+            request.headers.get("X-CSRF-Token")
+            or request.headers.get("X-CSRFToken")
+            or request.form.get("csrf_token")
+            or (request.get_json(silent=True) or {}).get("csrf_token")
+        )
+        cookie = request.cookies.get("csrf_token")
+        app.logger.debug(f"[CSRF] hdr={bool(token)} cookie={bool(cookie)} eq={token==cookie} sess={bool(session.get('_csrf'))}")
+        if not token or not cookie or token != cookie:
+            return jsonify({"ok": False, "msg": "CSRF mancante o non valido"}), 400
+        try:
+            validate_csrf(token)
+        except Exception:
+            return jsonify({"ok": False, "msg": "CSRF mancante o non valido"}), 400
         return f(*a, **kw)
     return wrapper
 
