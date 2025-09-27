@@ -407,6 +407,15 @@ def get_db():
 
     return conn
 
+def ensure_indexes():
+    with get_db() as conn:
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_stipendi_user_pid_anno_mese
+            ON stipendi_personale(user_id, personale_id, anno, mese)
+        """)
+        conn.commit()
+    print("[DB] ux_stipendi_user_pid_anno_mese OK", flush=True)
+
 def init_db():
     """Crea le tabelle se non esistono già (versione multi-tenant)"""
     with get_db() as conn:
@@ -2649,79 +2658,75 @@ def api_stipendi_anno(anno):
         return jsonify(success=False, error=str(e)), 500
 
 # --- PUT STIPENDI DIPENDENTE ---
-@app.put("/api/stipendi/<int:personale_id>")
 @require_login
 @require_license
 @require_csrf
-def api_upsert_stipendi(personale_id):
-    """Aggiorna i valori stipendio di un dipendente per più mesi (DB: mese=1..12)"""
-    payload = request.get_json(silent=True) or {}
+@app.put("/api/stipendi/<int:personale_id>")
+def api_put_stipendi(personale_id):
+    uid = _uid()
+    data = request.get_json(silent=True) or {}
+
     try:
-        anno = int(payload.get("anno"))
+        anno = int(data.get("anno"))
     except (TypeError, ValueError):
         return jsonify(success=False, error="Anno non valido"), 400
 
-    mesi = payload.get("mesi") or {}
-    if not isinstance(mesi, dict):
-        return jsonify(success=False, error="Formato mesi non valido"), 400
+    mesi = data.get("mesi") or {}
 
-    uid = _uid()
-    with get_db() as conn:
-        cur = conn.cursor()
+    # valida mesi 1..12
+    for m in mesi:
+        try:
+            im = int(m)
+            if im < 1 or im > 12:
+                return jsonify(success=False, error=f"Mese non valido: {m}"), 400
+        except Exception:
+            return jsonify(success=False, error=f"Mese non valido: {m}"), 400
 
-        # autorizzazione: il dipendente deve appartenere all'utente corrente
-        owner = cur.execute(
-            "SELECT 1 FROM personale WHERE id=? AND user_id=?",
-            (personale_id, uid)
-        ).fetchone()
-        if not owner:
-            return jsonify(success=False, error="Dipendente non trovato"), 404
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
 
-        for raw_month, raw_values in mesi.items():
-            token = (str(raw_month or "").strip().lower())
+            # ownership
+            cur.execute(
+                "SELECT 1 FROM personale WHERE id=? AND user_id=?",
+                (personale_id, uid),
+            )
+            if not cur.fetchone():
+                return jsonify(success=False, error="Dipendente inesistente"), 404
 
-            # accetta sia "gennaio" che "1"/"01"
-            if token.isdigit():
-                m = int(token)
-                if 1 <= m <= 12:
-                    mese_num = m
-                else:
-                    continue
-            else:
-                mese_num = MONTH_SLUG_TO_NUM.get(token)
-                if not mese_num:
-                    continue
+            # UPSERT su stipendi_personale
+            for m_str, payload in mesi.items():
+                mese = int(m_str)
+                lordo = float(payload.get("lordo") or 0.0)
+                netto = float(payload.get("netto") or 0.0)
+                contributi = float(payload.get("contributi") or 0.0)
+                pagato = payload.get("pagato")  # True/False/None
+                stato_val = "pagato" if pagato is True else "non_pagato"  # mai NULL
+                totale = lordo if lordo else None
 
-            values = raw_values or {}
-            lordo = round(max(_normalize_amount(values.get("lordo")), 0.0), 2)
-            netto = round(max(_normalize_amount(values.get("netto")), 0.0), 2)
-            contributi = round(max(lordo - netto, 0.0), 2)
-            totale = lordo
-            stato = "pagato" if values.get("pagato") else "non_pagato"
-
-            if lordo == 0 and netto == 0 and stato == "non_pagato":
                 cur.execute(
-                    "DELETE FROM stipendi_personale "
-                    "WHERE user_id=? AND personale_id=? AND anno=? AND mese=?",
-                    (uid, personale_id, anno, mese_num)
-                )
-            else:
-                cur.execute("""
+                    """
                     INSERT INTO stipendi_personale
                         (user_id, personale_id, anno, mese, lordo, netto, contributi, totale, stato_pagamento)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(user_id, personale_id, anno, mese) DO UPDATE SET
+                    ON CONFLICT(user_id, personale_id, anno, mese)
+                    DO UPDATE SET
                         lordo=excluded.lordo,
                         netto=excluded.netto,
                         contributi=excluded.contributi,
-                        totale=excluded.totale,
-                        stato_pagamento=excluded.stato_pagamento
-                """, (uid, personale_id, anno, mese_num,
-                      lordo, netto, contributi, totale, stato))
+                        totale=COALESCE(excluded.totale, stipendi_personale.totale),
+                        stato_pagamento=COALESCE(
+                            excluded.stato_pagamento,
+                            COALESCE(stipendi_personale.stato_pagamento, 'non_pagato')
+                        )
+                    """,
+                    (uid, personale_id, anno, mese, lordo, netto, contributi, totale, stato_val),
+                )
 
-        conn.commit()
-
-    return jsonify(success=True)
+            conn.commit()
+        return jsonify(success=True)
+    except Exception:
+        return jsonify(success=False, error="Errore salvataggio"), 500
 
 @app.get("/api/stipendi/dettaglio/<int:anno>")
 @require_login
@@ -4197,5 +4202,6 @@ except Exception as e:
         
 # === MAIN ===
 if __name__ == "__main__":
+    ensure_indexes()
     app.config["PROPAGATE_EXCEPTIONS"] = False
     app.run(debug=False)
