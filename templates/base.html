@@ -293,31 +293,29 @@
   </section>
 
   <!-- NAVBAR -->
-  <nav class="navbar navbar-expand-lg">
-    <div class="container-fluid d-flex align-items-center justify-content-between flex-wrap gap-3">
-      <div class="nav-links">
-        <ul class="navbar-nav flex-wrap align-items-center gap-1 mb-0">
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('home', anno=page_year) }}"><i class="bi bi-speedometer2 me-1"></i>Dashboard</a></li>
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('lista_clienti') }}"><i class="bi bi-people me-1"></i>Clienti</a></li>
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('gestione_personale') }}"><i class="bi bi-briefcase me-1"></i>Risorse Umane</a></li>
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('fornitori_page') }}"><i class="bi bi-truck me-1"></i>Fornitori</a></li>
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('fatture_page', anno=page_year) }}"><i class="bi bi-receipt me-1"></i>Fatture</a></li>
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('annual_report', anno=page_year) }}"><i class="bi bi-bar-chart-steps me-1"></i>Annuale</a></li>
-
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('percentuali') }}">📊 Controllo percentuali</a></li>
-
-        </ul>
-      </div>
-      <div class="header-actions d-flex flex-wrap align-items-center gap-2 ms-auto">
-        <a class="btn btn-info btn-sm" href="{{ url_for('profilo_bancario') }}"><i class="bi bi-credit-card me-1"></i>Dati Bancari</a>
-        <a id="btnReload" href="{{ (request.full_path or request.path).rstrip('?') }}" class="btn btn-warning btn-sm btn-refresh"><i class="bi bi-arrow-clockwise me-1"></i>Ricarica</a>
-        <span class="last-reload-label text-light">Ultimo aggiornamento:<span id="last-reload" class="ms-1 fw-semibold">--:--</span></span>
-        {% if session.get('user_id') %}
-          <a class="btn btn-danger btn-sm" href="{{ url_for('logout_confirm') }}"><i class="bi bi-box-arrow-right me-1"></i>Esci</a>
-        {% endif %}
-      </div>
+<nav class="navbar navbar-expand-lg">
+  <div class="container-fluid d-flex align-items-center justify-content-between flex-wrap gap-3">
+    <div class="nav-links">
+      <ul class="navbar-nav flex-wrap align-items-center gap-1 mb-0">
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('home', anno=page_year) }}"><i class="bi bi-speedometer2 me-1"></i>Dashboard</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('lista_clienti') }}"><i class="bi bi-people me-1"></i>Clienti</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('gestione_personale') }}"><i class="bi bi-briefcase me-1"></i>Risorse Umane</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('fornitori_page') }}"><i class="bi bi-truck me-1"></i>Fornitori</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('fatture_page', anno=page_year) }}"><i class="bi bi-receipt me-1"></i>Fatture</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('pagina_tasse') }}"><i class="bi bi-cash-coin me-1"></i>Tasse</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('annual_report', anno=page_year) }}"><i class="bi bi-bar-chart-steps me-1"></i>Annuale</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('percentuali') }}">📊 Controllo percentuali</a></li>
+      </ul>
     </div>
-  </nav>
+    <div class="header-actions d-flex flex-wrap align-items-center gap-2 ms-auto">
+      <a id="btnReload" href="{{ (request.full_path or request.path).rstrip('?') }}" class="btn btn-warning btn-sm btn-refresh"><i class="bi bi-arrow-clockwise me-1"></i>Ricarica</a>
+      <span class="last-reload-label text-light">Ultimo aggiornamento:<span id="last-reload" class="ms-1 fw-semibold">--:--</span></span>
+      {% if session.get('user_id') %}
+        <a class="btn btn-danger btn-sm" href="{{ url_for('logout_confirm') }}"><i class="bi bi-box-arrow-right me-1"></i>Esci</a>
+      {% endif %}
+    </div>
+  </div>
+</nav>
 
   <!-- CONTENUTO -->
   <main>

@@ -1,0 +1,58 @@
+[
+  {
+    "nome": "Agenzia delle Entrate",
+    "sito": "https://www.agenziaentrate.gov.it",
+    "telefono": "800.90.96.96",
+    "email": "",
+    "note": "Numero verde confermato. La PEC varia per direzione provinciale, da verificare localmente."
+  },
+  {
+    "nome": "INPS",
+    "sito": "https://www.inps.it",
+    "telefono": "803.164 (da fisso) / 06.164.164 (da mobile)",
+    "email": "",
+    "note": "Numero verde confermato. PEC cambia per direzione centrale, da verificare localmente."
+  },
+  {
+    "nome": "INAIL",
+    "sito": "https://www.inail.it",
+    "telefono": "06.6001",
+    "email": "",
+    "note": "Numero confermato. PEC non unificata, dipende dalla sede."
+  },
+  {
+    "nome": "Camera di Commercio (Unioncamere)",
+    "sito": "https://www.unioncamere.gov.it",
+    "telefono": "06.47041",
+    "email": "",
+    "note": "Contatti PEC variano per singola Camera di Commercio provinciale."
+  },
+  {
+    "nome": "SIAE",
+    "sito": "https://www.siae.it",
+    "telefono": "06.59901",
+    "email": "",
+    "note": "Email PEC non unica. Ogni sede SIAE ha contatti specifici."
+  },
+  {
+    "nome": "Agenzia delle Dogane e Monopoli (ADM)",
+    "sito": "https://www.adm.gov.it",
+    "telefono": "",
+    "email": "",
+    "note": "Contatti variano per direzioni regionali/provinciali."
+  },
+  {
+    "nome": "ASL",
+    "sito": "https://www.salute.gov.it",
+    "telefono": "1500 (numero ministero della salute)",
+    "email": "",
+    "note": "Ogni ASL ha PEC e recapiti propri, da verificare localmente."
+  },
+  {
+    "nome": "Comune",
+    "sito": "https://www.anagrafenazionale.interno.it",
+    "telefono": "",
+    "email": "",
+    "note": "Indirizzo, telefono ed email variano per ogni Comune."
+  }
+]

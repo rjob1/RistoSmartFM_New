@@ -1,0 +1,122 @@
+[
+  {
+    "nome": "IVA",
+    "periodicita": "Mensile o Trimestrale",
+    "ente": "Agenzia delle Entrate",
+    "note": "10% su somministrazione, 22% su altri beni"
+  },
+  {
+    "nome": "IRPEF",
+    "periodicita": "Annuale + acconti",
+    "ente": "Agenzia delle Entrate",
+    "note": "Per ditte individuali e società di persone"
+  },
+  {
+    "nome": "IRES",
+    "periodicita": "Annuale + acconti",
+    "ente": "Agenzia delle Entrate",
+    "note": "Per società di capitali"
+  },
+  {
+    "nome": "IRAP",
+    "periodicita": "Annuale + acconti",
+    "ente": "Regione / Agenzia Entrate",
+    "note": "Calcolata sul valore della produzione"
+  },
+  {
+    "nome": "Imposta di bollo",
+    "periodicita": "All’occorrenza",
+    "ente": "Agenzia delle Entrate",
+    "note": "Su contratti, fatture senza IVA, registrazioni"
+  },
+  {
+    "nome": "Imposta di registro",
+    "periodicita": "All’occorrenza",
+    "ente": "Agenzia delle Entrate",
+    "note": "Contratti di locazione, atti notarili"
+  },
+  {
+    "nome": "IMU",
+    "periodicita": "Giugno e Dicembre",
+    "ente": "Comune",
+    "note": "Sui fabbricati di proprietà"
+  },
+  {
+    "nome": "TASI",
+    "periodicita": "Giugno e Dicembre",
+    "ente": "Comune",
+    "note": "Su servizi indivisibili (se applicata)"
+  },
+  {
+    "nome": "TARI",
+    "periodicita": "Annuale",
+    "ente": "Comune",
+    "note": "Tassa sui rifiuti in base a superficie locale"
+  },
+  {
+    "nome": "TOSAP / COSAP",
+    "periodicita": "Annuale o Mensile",
+    "ente": "Comune",
+    "note": "Occupazione suolo pubblico (dehors, insegne)"
+  },
+  {
+    "nome": "Imposta pubblicità / insegne",
+    "periodicita": "Annuale",
+    "ente": "Comune",
+    "note": "Su cartelloni, vetrofanie e insegne esterne"
+  },
+  {
+    "nome": "Licenze e concessioni comunali",
+    "periodicita": "Annuale",
+    "ente": "Comune / ASL",
+    "note": "Autorizzazioni per somministrazione e rinnovi"
+  },
+  {
+    "nome": "INPS",
+    "periodicita": "Mensile",
+    "ente": "INPS",
+    "note": "Contributi titolare, soci e dipendenti"
+  },
+  {
+    "nome": "INAIL",
+    "periodicita": "Annuale",
+    "ente": "INAIL",
+    "note": "Assicurazione obbligatoria contro infortuni"
+  },
+  {
+    "nome": "Contributo camerale",
+    "periodicita": "Annuale",
+    "ente": "Camera di Commercio",
+    "note": "Iscrizione Registro Imprese"
+  },
+  {
+    "nome": "SIAE",
+    "periodicita": "Annuale o Mensile",
+    "ente": "SIAE",
+    "note": "Diritti d’autore per musica o intrattenimento"
+  },
+  {
+    "nome": "Accise su alcolici",
+    "periodicita": "Inclusa nei prezzi di acquisto",
+    "ente": "Agenzia delle Dogane e Monopoli",
+    "note": "Imposta indiretta su vino, birra, superalcolici"
+  },
+  {
+    "nome": "Accise su energia",
+    "periodicita": "Inclusa nei prezzi di fornitura",
+    "ente": "Agenzia delle Dogane e Monopoli",
+    "note": "Imposta su gas ed energia elettrica"
+  },
+  {
+    "nome": "Imposte su giochi / slot",
+    "periodicita": "Mensile o Annuale",
+    "ente": "ADM (Monopoli di Stato)",
+    "note": "Se presenti apparecchi da intrattenimento"
+  },
+  {
+    "nome": "Oneri sanitari / HACCP",
+    "periodicita": "Annuale o controlli ASL",
+    "ente": "ASL / Regione",
+    "note": "Certificazioni e controlli igienico-sanitari"
+  }
+]

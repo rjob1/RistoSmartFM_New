@@ -8,6 +8,37 @@ from collections import deque
 from types import SimpleNamespace
 from time import time
 from functools import wraps
+import qrcode
+from io import BytesIO
+
+def genera_qr_sepa(iban, nome_ente, importo, causale, bic=None):
+    euro = f"EUR{float(importo):.2f}"
+    descrizione = (causale or "")[:140]  # massimo 140 caratteri
+    bic_clean = (bic or "").replace(" ", "")[:11]
+
+    qr_lines = [
+        "BCD",           # Versione
+        "001",           # Codifica
+        "1",             # Identificativo
+        "SCT",           # Tipo bonifico SEPA
+        bic_clean,
+        nome_ente[:70],         # Nome beneficiario
+        iban.replace(" ", ""),  # IBAN senza spazi
+        euro,
+        "",                # Purpose code opzionale
+        descrizione
+    ]
+
+    qr_data = "\n".join(qr_lines)
+
+    img = qrcode.make(qr_data)
+    buffered = BytesIO()
+    img.save(buffered, format="PNG")
+
+    qr_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    return f"data:image/png;base64,{qr_base64}"
+
+
 
 # Se usi matplotlib altrove, tieni questa riga PRIMA di qualunque "import matplotlib"
 os.environ.setdefault("MPLBACKEND", "Agg")
@@ -19,6 +50,10 @@ from flask_wtf.csrf import generate_csrf, validate_csrf
 from utils.crypto import encrypt_data
 
 OPEN_PATHS = ("/login", "/logout", "/register", "/attiva", "/privacy", "/condizioni", "/heartbeat", "/static/")
+
+# --- limiti anno globali per tutte le API stipendi ---
+YEAR_MIN = 2000
+YEAR_MAX = 2100
 
 MONTH_SLUGS = [
     "gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno",
@@ -501,6 +536,24 @@ def ensure_triggers():
           END;
         END;""")
 
+                # Anno valido 2000..2100
+        conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS sp_anno_range_ins
+        BEFORE INSERT ON stipendi_personale
+        BEGIN
+          SELECT CASE
+            WHEN NEW.anno < 2000 OR NEW.anno > 2100 THEN RAISE(ABORT,'anno invalido')
+          END;
+        END;""")
+        conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS sp_anno_range_upd
+        BEFORE UPDATE OF anno ON stipendi_personale
+        BEGIN
+          SELECT CASE
+            WHEN NEW.anno < 2000 OR NEW.anno > 2100 THEN RAISE(ABORT,'anno invalido')
+          END;
+        END;""")
+
         # Importi non negativi
         conn.execute("""
         CREATE TRIGGER IF NOT EXISTS sp_importi_nonneg_ins
@@ -736,9 +789,54 @@ def init_db():
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_licenze_email ON licenze(email)")
 
-        # NON chiamare conn.commit() - il context manager lo fa automaticamente
-        # NON chiamare conn.close() - il context manager lo fa automaticamente
+        # --- TASSE E ENTE --
+        #               
+                # --- ENTI (multi-tenant, multipli per utente) ---
 
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS ente (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                nome TEXT NOT NULL,
+                indirizzo TEXT,
+                telefono TEXT,
+                email TEXT NOT NULL,
+                iban TEXT,
+                bic TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (user_id) REFERENCES utenti(id) ON DELETE CASCADE
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_ente_user ON ente(user_id)")
+        
+                # --- TASSE (multi-tenant) ---
+                
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS tasse (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                ente_id INTEGER NOT NULL,
+                causale TEXT,
+                periodo TEXT,
+                importo REAL,
+                scadenza TEXT,
+                stato TEXT CHECK(stato IN ('non_pagato','pagato','standby')) DEFAULT 'non_pagato',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (ente_id) REFERENCES ente(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES utenti(id) ON DELETE CASCADE
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_tasse_user ON tasse(user_id)")
+
+        cur.execute("PRAGMA table_info(tasse)")
+        tasse_cols = {row[1] for row in cur.fetchall()}
+        if "data_inserimento" not in tasse_cols:
+            cur.execute("ALTER TABLE tasse ADD COLUMN data_inserimento TEXT")
+            cur.execute("UPDATE tasse SET data_inserimento = substr(created_at, 1, 10) WHERE data_inserimento IS NULL")
+
+
+        # NON chiamare conn.commit() - il context manager lo fa automaticamente
+        
 # Inizializza DB all'avvio
 init_db()
 
@@ -1087,20 +1185,68 @@ def create_user(nome: str, cognome: str, email: str, password: str, newsletter_o
         conn.close()
 
 def has_active_license(email: str) -> bool:
-    email_n = _normalize_email(email)
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT 1
-        FROM licenze
-        WHERE email = ?
-          AND attiva = 1
-          AND (scadenza IS NULL OR date(scadenza) >= date('now'))
-        LIMIT 1
-    """, (email_n,))
-    ok = cur.fetchone() is not None
-    conn.close()
-    return ok
+    """
+    Ritorna True se l'utente corrente ha una licenza attiva.
+    Requisiti rispettati:
+      - usa _uid()/session user_id per isolamento multi-tenant
+      - BYPASS DEV-TRIAL (solo chiave esatta)
+      - verifica scadenza quando presente
+    """
+    try:
+        # normalizza email in ingresso
+        email_n = _normalize_email(email or "")
+    except Exception:
+        return False
+
+    # prendiamo l'uid dalla sessione: se non c'è, neghiamo (mai fidarsi del client)
+    uid = session.get("user_id") or session.get("uid")
+    if not uid:
+        return False
+
+    # controllo rapido su eventuale valore già presente in sessione (dev)
+    lic_key_session = (session.get("license_key") or session.get("license") or session.get("licenza") or "").strip().upper()
+    if lic_key_session == "DEV-TRIAL":
+        return True
+
+    try:
+        with get_db() as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            # cerchiamo la licenza associata allo stesso user_id e stessa email
+            cur.execute("""
+                SELECT chiave, scadenza, attiva
+                FROM licenze
+                WHERE user_id = ? AND email = ? AND attiva = 1
+                ORDER BY id DESC
+                LIMIT 1
+            """, (uid, email_n))
+            row = cur.fetchone()
+            if not row:
+                return False
+
+            chiave = (row["chiave"] or "").strip().upper()
+            scadenza = row["scadenza"]
+
+            # bypass DEV-TRIAL anche se salvata nel DB
+            if chiave == "DEV-TRIAL":
+                return True
+
+            # se è presente la scadenza la verifichiamo
+            if scadenza:
+                try:
+                    from datetime import datetime
+                    expiry = datetime.strptime(scadenza, "%Y-%m-%d").date()
+                    return expiry >= datetime.utcnow().date()
+                except Exception:
+                    # formato inatteso -> consideriamo non valida
+                    return False
+
+            # se non c'è scadenza e attiva==1 -> consideriamo valida
+            return True
+    except Exception:
+        # in caso di errori di DB non esporre dettagli, neghiamo accesso
+        return False
+
 
 def get_license_by_key(key: str):
     key = (key or "").strip()
@@ -2692,16 +2838,16 @@ def api_delete_personale(pid):
 
 #------------------------------------------------------------------------------------------------
 
-# =========================
-#         STIPENDI
-# =========================
+# ======================
+# API STIPENDI
+# ======================
 
 # --- GET STIPENDI MENSILI ---
 @app.get("/api/stipendi/<int:anno>/<int:mese>")
 @require_login
 @require_license
 def api_stipendi_mese(anno, mese):
-    """Restituisce il totale stipendi per ruolo in un dato mese (mese=1..12)"""
+    """Totali stipendi per ruolo in un dato mese"""
     user_id = _uid()
     if mese < 1 or mese > 12:
         return jsonify(success=False, error="Mese non valido"), 400
@@ -2714,7 +2860,7 @@ def api_stipendi_mese(anno, mese):
         "Staff Pulizie": "staff-pulizie",
         "Altro": "altro"
     }
-    totali = {key: 0 for key in mappa.values()}
+    totali = {key: 0.0 for key in mappa.values()}
 
     with get_db() as conn:
         conn.row_factory = sqlite3.Row
@@ -2726,19 +2872,20 @@ def api_stipendi_mese(anno, mese):
             WHERE sp.user_id = ? AND sp.anno = ? AND sp.mese = ?
         """, (user_id, anno, mese)).fetchall()
 
-        for r in rows:
-            ruolo = r["ruolo"] or "Altro"
-            key = mappa.get(ruolo, "altro")
-            totali[key] += r["lordo"] or 0.0
+    for r in rows:
+        ruolo = r["ruolo"] or "Altro"
+        key = mappa.get(ruolo, "altro")
+        totali[key] += r["lordo"] or 0.0
 
     return jsonify(success=True, stipendi=totali)
+
 
 # --- GET STIPENDI ANNUALI ---
 @app.get("/api/stipendi/<int:anno>")
 @require_login
 @require_license
 def api_stipendi_anno(anno):
-    """Restituisce i totali stipendi per ruolo in un anno intero"""
+    """Totali stipendi per ruolo in un anno"""
     user_id = _uid()
     mappa = {
         "Amministrazione": "amministrazione",
@@ -2748,100 +2895,87 @@ def api_stipendi_anno(anno):
         "Staff Pulizie": "staff-pulizie",
         "Altro": "altro"
     }
-    totali = {key: 0 for key in mappa.values()}
+    totali = {key: 0.0 for key in mappa.values()}
 
-    try:
-        with get_db() as conn:
-            conn.row_factory = sqlite3.Row
-            cur = conn.cursor()
-            rows = cur.execute("""
-                SELECT sp.lordo, p.ruolo
-                FROM stipendi_personale sp
-                JOIN personale p ON p.id = sp.personale_id AND p.user_id = sp.user_id
-                WHERE sp.user_id = ? AND sp.anno = ?
-            """, (user_id, anno)).fetchall()
+    with get_db() as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        rows = cur.execute("""
+            SELECT sp.lordo, p.ruolo
+            FROM stipendi_personale sp
+            JOIN personale p ON p.id = sp.personale_id AND p.user_id = sp.user_id
+            WHERE sp.user_id = ? AND sp.anno = ?
+        """, (user_id, anno)).fetchall()
 
-            for r in rows:
-                ruolo = r["ruolo"] or "Altro"
-                key = mappa.get(ruolo, "altro")
-                totali[key] += r["lordo"] or 0.0
+    for r in rows:
+        ruolo = r["ruolo"] or "Altro"
+        key = mappa.get(ruolo, "altro")
+        totali[key] += r["lordo"] or 0.0
 
-        return jsonify(success=True, stipendi=totali)
-    except Exception as e:
-        app.logger.error(f"Errore GET stipendi anno {anno}: {e}")
-        return jsonify(success=False, error=str(e)), 500
+    return jsonify(success=True, stipendi=totali)
 
 # --- PUT STIPENDI DIPENDENTE ---
+@app.put("/api/stipendi/<int:personale_id>")
 @require_login
 @require_license
 @require_csrf
-@app.put("/api/stipendi/<int:personale_id>")
-def api_put_stipendi(personale_id):
-    uid = _uid()
-    data = request.get_json(silent=True) or {}
-
+def api_upsert_stipendi(personale_id):
+    """Aggiorna i valori stipendio di un dipendente per più mesi"""
+    payload = request.get_json(silent=True) or {}
     try:
-        anno = int(data.get("anno"))
+        anno = int(payload.get("anno"))
     except (TypeError, ValueError):
         return jsonify(success=False, error="Anno non valido"), 400
 
-    mesi = data.get("mesi") or {}
+    mesi = payload.get("mesi") or {}
+    if not isinstance(mesi, dict):
+        return jsonify(success=False, error="Formato mesi non valido"), 400
 
-    # valida mesi 1..12
-    for m in mesi:
-        try:
-            im = int(m)
-            if im < 1 or im > 12:
-                return jsonify(success=False, error=f"Mese non valido: {m}"), 400
-        except Exception:
-            return jsonify(success=False, error=f"Mese non valido: {m}"), 400
+    uid = _uid()
+    with get_db() as conn:
+        cur = conn.cursor()
+        owner = cur.execute(
+            "SELECT 1 FROM personale WHERE id=? AND user_id=?",
+            (personale_id, uid)
+        ).fetchone()
+        if not owner:
+            return jsonify(success=False, error="Dipendente non trovato"), 404
 
-    try:
-        with get_db() as conn:
-            cur = conn.cursor()
+        for raw_month, raw_values in mesi.items():
+            mese_nome = (raw_month or "").strip().lower()
+            if mese_nome not in MONTH_SET:
+                continue
+            mese_num = MONTH_MAP[mese_nome]
 
-            # ownership
-            cur.execute(
-                "SELECT 1 FROM personale WHERE id=? AND user_id=?",
-                (personale_id, uid),
-            )
-            if not cur.fetchone():
-                return jsonify(success=False, error="Dipendente inesistente"), 404
+            values = raw_values or {}
+            lordo = max(_normalize_amount(values.get("lordo")), 0.0)
+            netto = max(_normalize_amount(values.get("netto")), 0.0)
+            contributi = max(lordo - netto, 0.0)
+            stato = "pagato" if values.get("pagato") else "non_pagato"
 
-            # UPSERT su stipendi_personale
-            for m_str, payload in mesi.items():
-                mese = int(m_str)
-                lordo = max(0.0, float(payload.get("lordo") or 0))
-                netto = max(0.0, float(payload.get("netto") or 0))
-                contributi = max(0.0, float(payload.get("contributi") or 0))
-                pagato = payload.get("pagato")  # True/False/None
-                stato_val = "pagato" if pagato is True else "non_pagato"  # mai NULL
-                totale = lordo if lordo else None
-
-                cur.execute(
-                    """
+            if lordo == 0 and netto == 0 and stato == "non_pagato":
+                cur.execute("""
+                    DELETE FROM stipendi_personale
+                    WHERE user_id=? AND personale_id=? AND anno=? AND mese=?
+                """, (uid, personale_id, anno, mese_num))
+            else:
+                cur.execute("""
                     INSERT INTO stipendi_personale
-                        (user_id, personale_id, anno, mese, lordo, netto, contributi, totale, stato_pagamento)
+                    (user_id, personale_id, anno, mese, lordo, netto, contributi, totale, stato_pagamento)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(user_id, personale_id, anno, mese)
-                    DO UPDATE SET
+                    ON CONFLICT(user_id, personale_id, anno, mese) DO UPDATE SET
                         lordo=excluded.lordo,
                         netto=excluded.netto,
                         contributi=excluded.contributi,
-                        totale=COALESCE(excluded.totale, stipendi_personale.totale),
-                        stato_pagamento=COALESCE(
-                            excluded.stato_pagamento,
-                            COALESCE(stipendi_personale.stato_pagamento, 'non_pagato')
-                        )
-                    """,
-                    (uid, personale_id, anno, mese, lordo, netto, contributi, totale, stato_val),
-                )
+                        totale=excluded.totale,
+                        stato_pagamento=excluded.stato_pagamento
+                """, (uid, personale_id, anno, mese_num, lordo, netto, contributi, lordo, stato))
 
-            conn.commit()
-        return jsonify(success=True)
-    except Exception:
-        return jsonify(success=False, error="Errore salvataggio"), 500
+        conn.commit()
 
+    return jsonify(success=True)
+
+# --- GET DETTAGLIO STIPENDI ---
 @app.get("/api/stipendi/dettaglio/<int:anno>")
 @require_login
 @require_license
@@ -2861,11 +2995,14 @@ def api_stipendi_dettaglio(anno):
 
     for r in rows:
         pid = str(r["personale_id"])
-        m = int(r["mese"]) if str(r["mese"]).strip().isdigit() else None
-        mese_slug = MONTH_NUM_TO_SLUG.get(m, str(r["mese"]).strip().lower())
-
-        rec = result.setdefault(pid, {"id": r["personale_id"], "nome": r["nome"], "ruolo": r["ruolo"], "mesi": {}})
-        rec["mesi"][mese_slug] = {
+        mese = int(r["mese"])
+        rec = result.setdefault(pid, {
+            "id": r["personale_id"],
+            "nome": r["nome"],
+            "ruolo": r["ruolo"],
+            "mesi": {}
+        })
+        rec["mesi"][mese] = {
             "lordo": float(r["lordo"] or 0.0),
             "netto": float(r["netto"] or 0.0),
             "contributi": float(r["contributi"] or 0.0),
@@ -2873,9 +3010,10 @@ def api_stipendi_dettaglio(anno):
             "pagato": (r["stato_pagamento"] == "pagato")
         }
 
-    return jsonify({"success": True, "stipendi": result})
+    return jsonify(success=True, stipendi=result)
 
-# --- DELETE TUTTI GLI STIPENDI DELL'UTENTE CORRENTE ---
+
+# --- DELETE TUTTI GLI STIPENDI ---
 @app.delete("/api/stipendi")
 @require_login
 @require_license
@@ -2898,6 +3036,7 @@ def api_stipendi_qr(personale_id):
     """Genera un QR SEPA per il pagamento stipendio di un dipendente"""
     payload = request.get_json(silent=True) or {}
     mese_slug = (payload.get("mese") or "").strip().lower()
+
     try:
         anno = int(payload.get("anno"))
     except (TypeError, ValueError):
@@ -2905,13 +3044,14 @@ def api_stipendi_qr(personale_id):
     if mese_slug not in MONTH_SET:
         return jsonify(error="Mese non valido"), 400
 
-    # normalizza mese: slug -> INT 1..12
+    # ✅ converto slug → numero
     mese_num = MONTH_SLUG_TO_NUM.get(mese_slug)
     if not mese_num:
         return jsonify(error="Mese non valido"), 400
 
     netto = max(_normalize_amount(payload.get("netto")), 0.0)
     uid = _uid()
+
     with get_db() as conn:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
@@ -2948,17 +3088,27 @@ def api_stipendi_qr(personale_id):
     categoria = (persona["ruolo"] or "Altro").strip()
     periodo = _format_periodo(mese_slug, anno)
 
-    remittance = f"Stipendio {periodo}"[:140]
-    info = f"Categoria: {categoria}"[:140]
+    remittance = f"Stipendio {periodo} - {categoria}"[:140]
+
+    # 📌 Schema EPC QR SEPA (EPC069-12 v2.2)
+    lines = [
+        "BCD",              # Service tag
+        "002",              # Version
+        "1",                # UTF-8
+        "SCT",              # SEPA Credit Transfer
+        "",                 # BIC (opzionale, lasciato vuoto)
+        nome,               # Beneficiario (max 70)
+        iban,               # IBAN
+        f"EUR{netto:.2f}",  # Importo
+        "",                 # Purpose (opzionale)
+        remittance          # Remittance info (descrizione pagamento)
+    ]
 
     qr = qrcode.QRCode(version=1, box_size=10, border=4)
-    qr.add_data("\n".join([
-        "BCD", "002", "1", "SCT", "",
-        nome, iban, f"EUR{netto:.2f}", "",
-        remittance, info
-    ]))
+    qr.add_data("\n".join(lines))
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white")
+
     buf = BytesIO()
     img.save(buf, format="PNG")
     qr_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
@@ -2970,7 +3120,7 @@ def api_stipendi_qr(personale_id):
         "categoria": categoria,
         "netto": round(netto, 2),
         "iban": iban
-    })
+    })  
 
 # ------------------------------------------------------------------------------------------
 
@@ -3499,7 +3649,504 @@ def api_fatture_scadenze(anno: int):
         """, (uid, anno, anno_prec)).fetchall()
     return jsonify([dict(r) for r in rows])
     
-# ------------------------------------------------------------------------------------------------
+# ----------------------#-----------------------------------------------------------------------------
+
+# --- API --- ENTI ---
+
+@app.post("/api/enti")
+@require_login
+@require_license
+def aggiungi_ente():
+    """Crea un nuovo ente per l'utente loggato"""
+    uid = _uid()
+    data = request.get_json()
+
+    if not data.get("nome") or not data.get("email"):
+        return jsonify(success=False, error="Nome ed Email obbligatori")
+
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO ente (user_id, nome, indirizzo, telefono, email, iban, bic)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                uid,
+                data.get("nome"),
+                data.get("indirizzo"),
+                data.get("telefono"),
+                data.get("email"),
+                data.get("iban"),
+                data.get("bic")
+            ))
+            new_id = cur.lastrowid
+        return jsonify(success=True, id=new_id)
+    except Exception as e:
+        app.logger.error(f"Errore INSERT ente (uid={uid}): {e}", exc_info=True)
+        return jsonify(success=False, error="Errore creazione ente"), 500
+
+
+@app.get("/api/enti")
+@require_login
+@require_license
+def api_get_enti():
+    """Restituisce tutti gli enti dell'utente loggato"""
+    uid = _uid()
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, nome, indirizzo, telefono, email, iban, bic, created_at
+                FROM ente
+                WHERE user_id = ?
+                ORDER BY nome ASC
+            """, (uid,))
+            rows = cur.fetchall()
+
+        app.logger.info(f"[API/enti] user_id={uid}, trovati={len(rows)} enti")
+        return jsonify(success=True, enti=[dict(r) for r in rows])
+    except Exception as e:
+        app.logger.error(f"Errore GET enti (uid={uid}): {e}", exc_info=True)
+        return jsonify(success=False, error="Errore caricamento enti"), 500
+
+
+@app.put("/api/enti/<int:ente_id>")
+@require_login
+@require_license
+def aggiorna_ente(ente_id):
+    """Aggiorna un ente esistente"""
+    uid = _uid()
+    data = request.get_json()
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE ente
+                SET nome = ?, indirizzo = ?, telefono = ?, email = ?, iban = ?, bic = ?
+                WHERE id = ? AND user_id = ?
+            """, (
+                data.get("nome"),
+                data.get("indirizzo"),
+                data.get("telefono"),
+                data.get("email"),
+                data.get("iban"),
+                data.get("bic"),
+                ente_id,
+                uid
+            ))
+        return jsonify(success=True)
+    except Exception as e:
+        app.logger.error(f"Errore UPDATE ente {ente_id}: {e}", exc_info=True)
+        return jsonify(success=False, error="Errore aggiornamento ente"), 500
+
+
+@app.delete("/api/enti/<int:ente_id>")
+@require_login
+@require_license
+def elimina_ente(ente_id):
+    """Elimina un ente"""
+    uid = _uid()
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM ente WHERE id = ? AND user_id = ?", (ente_id, uid))
+        return jsonify(success=True)
+    except Exception as e:
+        app.logger.error(f"Errore DELETE ente {ente_id}: {e}", exc_info=True)
+        return jsonify(success=False, error="Errore eliminazione ente"), 500
+
+@app.get("/api/enti/<int:ente_id>")
+@require_login
+@require_license
+def api_get_ente_by_id(ente_id):
+    """Restituisce un singolo ente dell'utente loggato"""
+    uid = _uid()
+    try:
+        with get_db() as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, nome, indirizzo, telefono, email, iban, bic, created_at
+                FROM ente
+                WHERE id = ? AND user_id = ?
+            """, (ente_id, uid))
+            row = cur.fetchone()
+
+        if not row:
+            return jsonify(success=False, error="Ente non trovato"), 404
+
+        return jsonify(success=True, ente=dict(row))
+
+    except Exception as e:
+        app.logger.error(f"Errore GET /api/enti/{ente_id}: {e}", exc_info=True)
+        return jsonify(success=False, error="Errore server"), 500
+
+        
+# --- API --- TASSE ---
+@app.post("/api/tasse")
+@require_login
+@require_license
+@require_csrf
+def aggiungi_tassa():
+    """Crea una nuova tassa per un ente specifico"""
+    uid = _uid()
+    data = request.get_json() or {}
+
+    ente_id_raw = data.get("ente_id")
+    causale = (data.get("causale") or "").strip()
+    periodo = (data.get("periodo") or "").strip()
+    importo = data.get("importo")
+    scadenza = (data.get("scadenza") or "").strip() or None
+    data_inserimento = (data.get("data_inserimento") or "").strip()
+    stato = (data.get("stato") or "non_pagato").strip()
+
+    allowed_states = {"non_pagato", "pagato", "standby"}
+
+    try:
+        ente_id = int(ente_id_raw)
+    except (TypeError, ValueError):
+        return jsonify(success=False, error="Ente non valido"), 400
+
+    if importo is None:
+        return jsonify(success=False, error="Ente e importo obbligatori"), 400
+    if not scadenza:
+        return jsonify(success=False, error="Scadenza obbligatoria"), 400
+
+    if stato not in allowed_states:
+        stato = "non_pagato"
+
+    if not data_inserimento:
+        data_inserimento = datetime.now().strftime("%Y-%m-%d")
+
+    try:
+        importo_val = float(importo)
+    except (TypeError, ValueError):
+        return jsonify(success=False, error="Importo non valido"), 400
+
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+
+            owner_check = cur.execute(
+                """
+                SELECT 1 FROM ente 
+                WHERE id = ? AND user_id = ?
+                """,
+                (ente_id, uid),
+            ).fetchone()
+
+            if not owner_check:
+                return jsonify(success=False, error="Ente non trovato o non autorizzato"), 404
+
+            cur.execute(
+                """
+                INSERT INTO tasse (user_id, ente_id, causale, periodo, importo, scadenza, stato, data_inserimento)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    uid,
+                    ente_id,
+                    causale or "Tassa generica",
+                    periodo,
+                    importo_val,
+                    scadenza,
+                    stato,
+                    data_inserimento,
+                ),
+            )
+
+            new_id = cur.lastrowid
+
+            row = cur.execute(
+                """
+                SELECT 
+                    t.id,
+                    t.ente_id,
+                    t.causale,
+                    t.periodo,
+                    t.importo,
+                    t.scadenza,
+                    t.stato,
+                    COALESCE(t.data_inserimento, t.created_at) AS data_inserimento,
+                    e.nome AS ente_nome,
+                    e.iban AS ente_iban,
+                    e.bic AS ente_bic
+                FROM tasse t
+                JOIN ente e ON t.ente_id = e.id AND e.user_id = t.user_id
+                WHERE t.id = ? AND t.user_id = ?
+                """,
+                (new_id, uid),
+            ).fetchone()
+
+        payload = {"success": True, "id": new_id}
+        if row:
+            payload["tassa"] = dict(row)
+        return jsonify(payload)
+
+    except Exception as e:
+        app.logger.error(f"Errore POST /api/tasse (uid={uid}): {e}", exc_info=True)
+        return jsonify(success=False, error="Errore salvataggio tassa"), 500
+
+@app.put("/api/tasse/<int:tassa_id>")
+@require_login
+@require_license
+@require_csrf
+def aggiorna_tassa(tassa_id):
+    """Aggiorna una tassa esistente"""
+    uid = _uid()
+    data = request.get_json() or {}
+
+    causale = (data.get("causale") or "").strip()
+    periodo = (data.get("periodo") or "").strip()
+    scadenza = (data.get("scadenza") or "").strip() or None
+    data_inserimento = (data.get("data_inserimento") or "").strip() or None
+    stato = (data.get("stato") or "non_pagato").strip()
+    importo = data.get("importo")
+
+    allowed_states = {"non_pagato", "pagato", "standby"}
+    if stato not in allowed_states:
+        stato = "non_pagato"
+
+    try:
+        importo_val = float(importo)
+    except (TypeError, ValueError):
+        return jsonify(success=False, error="Importo non valido"), 400
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE tasse
+            SET causale = ?, periodo = ?, importo = ?, scadenza = ?, stato = ?, data_inserimento = COALESCE(?, data_inserimento)
+            WHERE id = ? AND user_id = ?
+            """,
+            (
+                causale or "Tassa generica",
+                periodo,
+                importo_val,
+                scadenza,
+                stato,
+                data_inserimento,
+                tassa_id,
+                uid,
+            ),
+        )
+
+        if cur.rowcount == 0:
+            return jsonify(success=False, error="Tassa non trovata"), 404
+
+        row = cur.execute(
+            """
+            SELECT 
+                t.id,
+                t.ente_id,
+                t.causale,
+                t.periodo,
+                t.importo,
+                t.scadenza,
+                t.stato,
+                COALESCE(t.data_inserimento, t.created_at) AS data_inserimento,
+                e.nome AS ente_nome,
+                e.iban AS ente_iban,
+                e.bic AS ente_bic
+            FROM tasse t
+            JOIN ente e ON t.ente_id = e.id AND e.user_id = t.user_id
+            WHERE t.id = ? AND t.user_id = ?
+            """,
+            (tassa_id, uid),
+        ).fetchone()
+
+    if not row:
+        return jsonify(success=False, error="Tassa non trovata"), 404
+
+    return jsonify(dict(row))
+
+@app.delete("/api/tasse/<int:tassa_id>")
+@require_login
+@require_license
+@require_csrf
+def elimina_tassa(tassa_id):
+    """Elimina una tassa"""
+    uid = _uid()
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM tasse WHERE id = ? AND user_id = ?", (tassa_id, uid))
+    return jsonify(success=True)
+
+@app.get("/api/tasse/<int:t_id>/qr")
+@require_login
+@require_license
+def api_tassa_qr(t_id):
+    """Genera QR Code SEPA per pagamento tassa"""
+    uid = _uid()
+    with get_db() as conn:
+        cur = conn.cursor()
+        row = cur.execute("""
+            SELECT 
+                t.importo, t.causale, t.scadenza,
+                e.nome AS ente_nome, e.iban AS ente_iban, e.bic AS ente_bic
+            FROM tasse t
+            JOIN ente e ON t.ente_id = e.id AND e.user_id = t.user_id
+            WHERE t.id = ? AND t.user_id = ?
+        """, (t_id, uid)).fetchone()
+
+        if not row:
+            return jsonify({"error": "Tassa non trovata"}), 404
+        if not row["ente_iban"]:
+            return jsonify({"error": "IBAN non disponibile"}), 400
+
+        importo = f"{row['importo']:.2f}"
+        iban = row["ente_iban"]
+        bic = row["ente_bic"] or ""
+        beneficiario = row["ente_nome"]
+        causale = f"{row['causale']} - {t_id}"
+
+        # Stringa EPC QR Code
+        sepa_string = f"""BCD
+002
+1
+SCT
+{bic}
+{beneficiario}
+{iban}
+EUR{importo}
+
+{causale}"""
+
+        qr = qrcode.QRCode(version=1, box_size=10, border=4)
+        qr.add_data(sepa_string.strip())
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buf = BytesIO()
+        img.save(buf, format="PNG")
+        qr_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+        return jsonify({
+            "qr_image": f"data:image/png;base64,{qr_b64}",
+            "importo": importo,
+            "iban": iban,
+            "bic": bic,
+            "causale": causale,
+            "scadenza": row["scadenza"],
+            "ente": beneficiario
+        })
+
+@app.post("/api/tasse/<int:tassa_id>/paga")
+@require_login
+@require_license
+@require_csrf
+def conferma_pagamento(tassa_id):
+    """Imposta lo stato della tassa a 'pagato'"""
+    uid = _uid()
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE tasse
+            SET stato = 'pagato'
+            WHERE id = ? AND user_id = ?
+        """, (tassa_id, uid))
+    return jsonify(success=True)
+
+
+# --- PAGINE --- TASSE ---
+@app.get("/tasse")
+@require_login
+@require_license
+def pagina_tasse():
+    """Pagina principale per la gestione di enti e tasse"""
+    uid = _uid()
+    try:
+        with get_db() as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+
+            # Carica tutti gli enti dell'utente
+            cur.execute("""
+                SELECT id, nome, indirizzo, telefono, email, iban, bic, created_at
+                FROM ente
+                WHERE user_id = ?
+                ORDER BY nome ASC
+            """, (uid,))
+            enti = cur.fetchall()
+
+            # Carica le tasse con i dati completi dell'ente associato
+            cur.execute("""
+                SELECT 
+                    t.id,
+                    t.ente_id,
+                    t.causale,
+                    t.periodo,
+                    t.importo,
+                    t.scadenza,
+                    t.stato,
+                    COALESCE(t.data_inserimento, t.created_at) AS data_inserimento,
+                    e.nome AS ente_nome,
+                    e.iban AS ente_iban,
+                    e.bic AS ente_bic
+                FROM tasse t
+                JOIN ente e ON t.ente_id = e.id AND e.user_id = t.user_id
+                WHERE t.user_id = ?
+                ORDER BY date(t.scadenza) DESC, t.id DESC
+            """, (uid,))
+            tasse = cur.fetchall()
+
+            # Converti in dict
+            enti_list = [dict(row) for row in enti]
+            tasse_list = [dict(row) for row in tasse]
+
+        return render_template(
+            "tasse.html",
+            enti=enti_list,
+            tasse=tasse_list
+        )
+    except Exception as e:
+        app.logger.error(f"Errore caricamento /tasse (uid={uid}): {e}", exc_info=True)
+        return jsonify(success=False, error="Errore caricamento pagina"), 500
+
+@app.get("/api/tasse")
+@require_login
+@require_license
+def api_get_tasse():
+    """Restituisce tutte le tasse dell'utente loggato"""
+    uid = _uid()
+    try:
+        with get_db() as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+
+            cur.execute("""
+                SELECT 
+                    t.id,
+                    t.ente_id,
+                    t.causale,
+                    t.periodo,
+                    t.importo,
+                    t.scadenza,
+                    t.stato,
+                    COALESCE(t.data_inserimento, t.created_at) AS data_inserimento,
+                    e.nome AS ente_nome,
+                    e.iban AS ente_iban,
+                    e.bic AS ente_bic
+                FROM tasse t
+                JOIN ente e ON t.ente_id = e.id AND e.user_id = t.user_id
+                WHERE t.user_id = ?
+                ORDER BY date(t.scadenza) DESC, t.id DESC
+            """, (uid,))
+            rows = cur.fetchall()
+
+        return jsonify(success=True, tasse=[dict(row) for row in rows])
+    except Exception as e:
+        app.logger.error(f"Errore GET /api/tasse (uid={uid}): {e}", exc_info=True)
+        return jsonify(success=False, error="Errore caricamento tasse"), 500
+
+@app.route("/pagamento-tasse.html")
+@require_login
+@require_license
+def pagamento_tasse():
+    """Pagina per aggiungere una nuova tassa"""
+    return render_template("pagamento-tasse.html")
+
+#-- FINE --- ENTE -- Tasse
 
 # === API: Incassi Annuali ===
 @app.get("/api/incassi/<int:anno>/")
@@ -3805,7 +4452,7 @@ def fatture_page(anno):
 @app.route("/fatture")
 def fatture_alias():
     anno = _get_selected_year()
-    return redirect(url_for("fatture_page", anno=anno))
+    return redirect(url_for("fatture_page", anno=anno))    
 
 # --- Api -- ANNO
 

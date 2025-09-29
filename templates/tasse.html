@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+{# 
+📑 NOTE ENTI.JSON
+- File in: static/data/enti.json
+- Ogni ente = { "nome","sito","telefono","email","note" }
+- Controlla sintassi JSON (no virgole finali). Test: http://127.0.0.1:5000/static/data/enti.json
+#}
+{% block title %}RistoSmart FM / Tasse & Contributi{% endblock %}
+
+
+{% block content %}
+<div class="container py-4">
+  <h2 class="mb-4">📑 Tasse & Contributi</h2>
+
+  <!-- Form inserimento ente -->
+  <form id="form-ente" class="row g-3 mb-4">
+    <div class="col-md-6">
+      <label class="form-label">Nome ente *</label>
+      <div class="input-group">
+        <select id="ente-nome" class="form-select" required>
+          <option value="">-- Seleziona ente --</option>
+          <!-- Opzioni generate via JS -->
+        </select>
+        <button type="button" id="ente-info" class="btn btn-outline-secondary"
+                data-bs-toggle="tooltip" data-bs-placement="top" title="Seleziona un ente per info">
+          ℹ️
+        </button>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <label class="form-label">Sito</label>
+      <input type="text" id="ente-sito" class="form-control" placeholder="https://...">
+    </div>
+
+    <div class="col-md-6">
+      <label class="form-label">Telefono</label>
+      <input type="text" id="ente-telefono" class="form-control" placeholder="+39...">
+    </div>
+
+    <div class="col-md-6">
+      <label class="form-label">Email *</label>
+      <input type="email" id="ente-email" class="form-control" required placeholder="email@ente.it">
+    </div>
+
+    <div class="col-md-6">
+      <label class="form-label">IBAN</label>
+      <input type="text" id="ente-iban" class="form-control" placeholder="IT60X...">
+    </div>
+
+    <div class="col-md-6">
+      <label class="form-label">BIC</label>
+      <input type="text" id="ente-bic" class="form-control" placeholder="SWIFT/BIC">
+    </div>
+
+    <div class="col-12 text-end">
+      <button type="button" class="btn btn-success" id="btn-salva-ente">💾 Salva dati ente</button>
+    </div>
+  </form>
+
+
+  <!-- ✅ Pulsante per modulo pagamento -->
+  <div class="mt-4">
+    <a href="/pagamento-tasse.html" class="btn btn-primary">
+      Apri modulo di pagamento
+    </a>
+  </div>
+  
+  <!-- Elenco enti -->
+  <h4 class="mb-3">📋 Enti registrati</h4>
+  <div class="table-responsive">
+    <table class="table table-striped align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>Nome ente *</th>
+          <th>Sito</th>
+          <th>Telefono</th>
+          <th>Email *</th>
+          <th>IBAN</th>
+          <th>BIC</th>
+          <th>Azioni</th>
+        </tr>
+      </thead>
+      <tbody id="enti-body">
+        <!-- righe generate via JS -->
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", async () => {
+  const entiKey = "ENTI_CACHE";
+
+  // 🔄 Render tabella enti
+  function renderEnti(enti) {
+    const body = document.getElementById("enti-body");
+    body.innerHTML = "";
+    enti.forEach((ente, idx) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${ente.nome}</td>
+        <td>${ente.sito || ""}</td>
+        <td>${ente.telefono || ""}</td>
+        <td>${ente.email}</td>
+        <td>${ente.iban || ""}</td>
+        <td>${ente.bic || ""}</td>
+        <td>
+          <button class="btn btn-sm btn-warning btn-modifica" data-idx="${idx}">Modifica</button>
+          <button class="btn btn-sm btn-danger btn-elimina" data-idx="${idx}">Elimina</button>
+        </td>`;
+      body.appendChild(tr);
+    });
+  }
+
+  // 🔄 Carica elenco enti nazionali da enti.json
+  async function loadEntiNazionali() {
+    try {
+      const res = await fetch("/static/data/enti.json");
+      const data = await res.json();
+      const select = document.getElementById("ente-nome");
+      const infoBtn = document.getElementById("ente-info");
+
+      data.forEach(e => {
+        const opt = document.createElement("option");
+        opt.value = e.nome;
+        opt.textContent = e.nome;
+        opt.dataset.sito = e.sito;
+        opt.dataset.telefono = e.telefono;
+        opt.dataset.email = e.email;
+        opt.dataset.note = e.note || "";
+        select.appendChild(opt);
+      });
+
+      // Quando selezioni un ente → riempi i campi + aggiorna tooltip
+      select.addEventListener("change", () => {
+        const opt = select.options[select.selectedIndex];
+        document.getElementById("ente-sito").value = opt.dataset.sito || "";
+        document.getElementById("ente-telefono").value = opt.dataset.telefono || "";
+        document.getElementById("ente-email").value = opt.dataset.email || "";
+
+        // aggiorna tooltip ℹ️
+        infoBtn.setAttribute("title", opt.dataset.note || "Nessuna nota");
+        const tooltip = bootstrap.Tooltip.getInstance(infoBtn);
+        if (tooltip) tooltip.dispose();
+        new bootstrap.Tooltip(infoBtn);
+      });
+    } catch (err) {
+      console.error("Errore caricamento enti.json:", err);
+    }
+  }
+
+  // 🔄 Carica enti salvati nel DB
+  async function loadEnti() {
+    try {
+      const res = await fetch("/api/enti");
+      const data = await res.json();
+      if (data.success) {
+        localStorage.setItem(entiKey, JSON.stringify(data.enti));
+        renderEnti(data.enti);
+      } else {
+        alert("Errore caricamento enti dal DB");
+      }
+    } catch (err) {
+      console.error("Errore GET /api/enti:", err);
+    }
+  }
+
+  // 💾 Salva (nuovo o modifica)
+  document.getElementById("btn-salva-ente").addEventListener("click", async () => {
+    const payload = {
+      nome: document.getElementById("ente-nome").value.trim(),
+      sito: document.getElementById("ente-sito").value.trim(),
+      telefono: document.getElementById("ente-telefono").value.trim(),
+      email: document.getElementById("ente-email").value.trim(),
+      iban: document.getElementById("ente-iban").value.trim(),
+      bic: document.getElementById("ente-bic").value.trim()
+    };
+    if (!payload.nome || !payload.email) {
+      alert("Nome ente ed Email sono obbligatori");
+      return;
+    }
+
+    const editIdx = document.getElementById("form-ente").dataset.editIdx;
+    const enti = JSON.parse(localStorage.getItem(entiKey) || "[]");
+
+    if (editIdx !== undefined && editIdx !== "") {
+      const ente = enti[editIdx];
+      const res = await fetch(`/api/enti/${ente.id}`, {
+        method: "PUT",
+        headers: { "Content-Type":"application/json", "X-CSRF-Token":window.CSRF_TOKEN },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!data.success) {
+        alert("Errore update DB: " + (data.error || "sconosciuto"));
+        return;
+      }
+      enti[editIdx] = {...ente, ...payload};
+      localStorage.setItem(entiKey, JSON.stringify(enti));
+      document.getElementById("form-ente").dataset.editIdx = "";
+    } else {
+      const res = await fetch("/api/enti", {
+        method: "POST",
+        headers: { "Content-Type":"application/json", "X-CSRF-Token":window.CSRF_TOKEN },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!data.success) {
+        alert("Errore insert DB: " + (data.error || "sconosciuto"));
+        return;
+      }
+      enti.push({...payload, id: data.id});
+      localStorage.setItem(entiKey, JSON.stringify(enti));
+    }
+
+    renderEnti(enti);
+    document.getElementById("form-ente").reset();
+  });
+
+  // 🗑️ Modifica/Elimina
+  document.getElementById("enti-body").addEventListener("click", async e => {
+    const enti = JSON.parse(localStorage.getItem(entiKey) || "[]");
+
+    if (e.target.classList.contains("btn-elimina")) {
+      const idx = e.target.dataset.idx;
+      const ente = enti[idx];
+      if (confirm("Vuoi davvero eliminare questo ente?")) {
+        const res = await fetch(`/api/enti/${ente.id}`, {
+          method: "DELETE",
+          headers: { "X-CSRF-Token": window.CSRF_TOKEN }
+        });
+        const data = await res.json();
+        if (!data.success) {
+          alert("Errore delete DB: " + (data.error || "sconosciuto"));
+          return;
+        }
+        enti.splice(idx, 1);
+        localStorage.setItem(entiKey, JSON.stringify(enti));
+        renderEnti(enti);
+      }
+    }
+
+    if (e.target.classList.contains("btn-modifica")) {
+      const idx = e.target.dataset.idx;
+      const ente = enti[idx];
+      document.getElementById("ente-nome").value = ente.nome;
+      document.getElementById("ente-sito").value = ente.sito || "";
+      document.getElementById("ente-telefono").value = ente.telefono || "";
+      document.getElementById("ente-email").value = ente.email;
+      document.getElementById("ente-iban").value = ente.iban || "";
+      document.getElementById("ente-bic").value = ente.bic || "";
+      document.getElementById("form-ente").dataset.editIdx = idx;
+    }
+  });
+
+  // Abilita tooltips Bootstrap
+  const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+  tooltipTriggerList.map(el => new bootstrap.Tooltip(el));
+
+  // 🚀 Prima ricarica
+  await loadEntiNazionali();   // menu a tendina
+  await loadEnti();            // tabella dal DB
+});
+</script>
+{% endblock %}
