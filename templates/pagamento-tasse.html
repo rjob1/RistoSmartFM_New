@@ -4,7 +4,24 @@
 
 {% block content %}
 <div class="container-fluid mt-4 px-4">
-  <h2 class="mb-3">➕ Aggiunta Tassa</h2>
+  <!-- Pulsante Scarica PDF -->
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="mb-0">➕ Aggiunta Tassa</h2>
+    <div class="dropdown">
+      <button class="btn btn-outline-danger btn-sm dropdown-toggle" type="button" id="downloadPdfMenu" data-bs-toggle="dropdown" aria-expanded="false">
+        📄 Scarica PDF
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="downloadPdfMenu">
+        <li><a class="dropdown-item" href="#" onclick="scaricaPdfTasse(null, null)">📄 Tutte le tasse</a></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><a class="dropdown-item" href="#" onclick="scaricaPdfTasse(null, 'pagato')">🟢 Solo Pagate</a></li>
+        <li><a class="dropdown-item" href="#" onclick="scaricaPdfTasse(null, 'non_pagato')">🔴 Non Pagate</a></li>
+        <li><a class="dropdown-item" href="#" onclick="scaricaPdfTasse(null, 'standby')">🟡 In Standby</a></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><a class="dropdown-item" href="#" onclick="scaricaPdfTasseSelezione()">📋 Selezionate</a></li>
+      </ul>
+    </div>
+  </div>  
 
   <!-- Notifiche -->
   <div id="notifiche" class="alert alert-info d-none mb-3"></div>
@@ -14,6 +31,7 @@
     <table class="table table-striped table-hover">
       <thead class="table-light">
         <tr>
+          <th style="width: 60px;"><input type="checkbox" onchange="toggleAllCheckboxes(this)"></th>
           <th style="min-width: 120px;">Data</th>
           <th style="min-width: 180px;">Ente</th>
           <th style="min-width: 180px;">Causale</th>
@@ -55,6 +73,7 @@
     <table class="table table-striped table-hover" id="tabellaTasse">
       <thead class="table-light">
         <tr>
+          <th style="width: 60px;"><input type="checkbox" onchange="toggleAllCheckboxes(this)"></th>
           <th style="min-width: 120px;">Data</th>
           <th style="min-width: 180px;">Ente</th>
           <th style="min-width: 180px;">Causale</th>
@@ -64,6 +83,7 @@
           <th style="width: 150px;">Azioni</th>
         </tr>
       </thead>
+
       <tbody></tbody>
     </table>
   </div>
@@ -171,6 +191,61 @@
 {% block scripts %}
 {% raw %}
 <script>
+
+// --- Funzioni PDF (prima di DOMContentLoaded) ---
+function toggleAllCheckboxes(source) {
+  const checkboxes = document.querySelectorAll('.tax-checkbox');
+  checkboxes.forEach(cb => cb.checked = source.checked);
+}
+
+async function scaricaPdfTasse(ids = null, stato = null) {
+  const payload = { ids, stato };
+  try {
+    const res = await window.csrfFetch('/api/pagamenti-tasse/pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (res.status === 404) {
+      const errData = await res.json().catch(() => ({}));
+      alert(errData.error || "❌ Nessuna tassa trovata per questa categoria.");
+      return;
+    }
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || "Errore nel generare il PDF");
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tasse_${stato || 'tutte'}_${new Date().toISOString().slice(0,10)}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error("Errore scaricamento PDF:", err);
+    alert("❌ Errore durante il download del PDF.");
+  }
+}
+
+function scaricaPdfTasseSelezione() {
+  const checked = document.querySelectorAll('.tax-checkbox:checked');
+  const ids = Array.from(checked).map(cb => parseInt(cb.value));
+  console.log("ID selezionati per PDF:", ids);  // ✅ aggiungi questa riga
+  if (ids.length === 0) {
+    alert("Seleziona almeno una tassa.");
+    return;
+  }
+  scaricaPdfTasse(ids, null);
+}
+
+
+//--- Logica principale ---
 document.addEventListener("DOMContentLoaded", async () => {
   const toast = new bootstrap.Toast(document.getElementById("toast"));
   let entiCache = [];
@@ -339,30 +414,31 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     tr.innerHTML = `
-  <td><input type="date" class="form-control form-control-sm data-input bg-white" value="${t.data_inserimento || ''}" disabled></td>
-  <td>
-    <select class="form-select form-select-sm ente-input bg-white" disabled>
-      <option value="">-- Seleziona --</option>
-      ${entiCache.map(e => `
-        <option value="${e.id}" ${e.id == t.ente_id ? 'selected' : ''}>
-          ${e.nome} ${e.iban ? `(IBAN: ${e.iban})` : ""}
-        </option>
-      `).join("")}
-    </select>
-  </td>
-  <td><input type="text" class="form-control form-control-sm causale-input bg-white" value="${t.causale || ''}" disabled></td>
-  <td><input type="date" class="form-control form-control-sm scadenza-input bg-white" value="${t.scadenza || ''}" disabled></td>
-  <td><input type="number" step="0.01" class="form-control form-control-sm importo-input bg-white" value="${t.importo ? t.importo.toFixed(2) : ''}" disabled></td>
-  <td><select class="form-select form-select-sm stato-input bg-white" disabled>${statoOpt}</select></td>
-  <td class="text-end">
-    <div class="d-flex justify-content-end gap-1">
-      <button class="btn btn-outline-primary btn-sm btn-edit"><i class="bi bi-pencil"></i></button>
-      <button class="btn btn-outline-success btn-sm btn-save d-none"><i class="bi bi-save"></i></button>
-      ${btnPagaHtml}
-      <button class="btn btn-outline-danger btn-sm btn-elimina"><i class="bi bi-trash"></i></button>
-    </div>
-  </td>
-`;
+      <td><input type="checkbox" class="form-check-input tax-checkbox" value="${t.id}"></td>
+      <td><input type="date" class="form-control form-control-sm data-input bg-white" value="${t.data_inserimento || ''}" disabled></td>
+      <td>
+        <select class="form-select form-select-sm ente-input bg-white" disabled>
+          <option value="">-- Seleziona --</option>
+          ${entiCache.map(e => `
+            <option value="${e.id}" ${e.id == t.ente_id ? 'selected' : ''}>
+              ${e.nome} ${e.iban ? `(IBAN: ${e.iban})` : ""}
+            </option>
+          `).join("")}
+        </select>
+      </td>
+      <td><input type="text" class="form-control form-control-sm causale-input bg-white" value="${t.causale || ''}" disabled></td>
+      <td><input type="date" class="form-control form-control-sm scadenza-input bg-white" value="${t.scadenza || ''}" disabled></td>
+      <td><input type="number" step="0.01" class="form-control form-control-sm importo-input bg-white" value="${t.importo ? t.importo.toFixed(2) : ''}" disabled></td>
+      <td><select class="form-select form-select-sm stato-input bg-white" disabled>${statoOpt}</select></td>
+      <td class="text-end">
+        <div class="d-flex justify-content-end gap-1">
+          <button class="btn btn-outline-primary btn-sm btn-edit"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-outline-success btn-sm btn-save d-none"><i class="bi bi-save"></i></button>
+          ${btnPagaHtml}
+          <button class="btn btn-outline-danger btn-sm btn-elimina"><i class="bi bi-trash"></i></button>
+        </div>
+      </td>
+    `;
 
     tr.dataset.id = t.id;
     aggiornaColoriRiga(tr, t);
@@ -551,6 +627,51 @@ document.addEventListener("DOMContentLoaded", async () => {
           if (oldTr) oldTr.remove();
 
           mostraToast("✅ Pagamento confermato");
+
+          // ✅ CALCOLA IN QUALE MESE DEVE ESSERE REGISTRATA LA SPESA
+          const meseScadenza = t.scadenza || t.data_inserimento;
+          const [anno, mese] = meseScadenza.split('-'); // es. "2025-01-15" → ["2025", "01"]
+          const nomeMese = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno",
+                            "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"][parseInt(mese)-1];
+
+          // ✅ ID DEL CAMPO NEL MESE.HTML (es. #agenzia_entrata)
+          const idSpesa = t.ente_id?.toString(); 
+          const mappaEnti = {
+            "1": "agenzia_entrata",     // Agenzia delle Entrate
+            "2": "inps",                // INPS
+            "3": "inail",               // INAIL
+            "4": "camera_commercio",    // Camera di Commercio
+            "5": "siae",                // SIAE
+            "6": "adm",                 // ADM
+            "7": "asl",                 // ASL
+            "8": "comune"               // Comune
+          };
+          const campoId = mappaEnti[idSpesa] || null;
+
+          if (!campoId) {
+            console.warn("Nessun campo associato per l'ente ID:", idSpesa);
+          } else {
+            // ✅ INVIA DATO A MESE.HTML ATTRAVERSO localStorage + EVENTO
+            try {
+              const payload = {
+                tipo: "tassa_pagata",
+                anno: anno,
+                mese: nomeMese,
+                campo: campoId,
+                importo: parseFloat(t.importo),
+                timestamp: Date.now()
+              };
+
+              // Invia segnale a mese.html
+              localStorage.removeItem('trigger_mese_update');
+              localStorage.setItem('trigger_mese_update', JSON.stringify(payload));
+              setTimeout(() => localStorage.removeItem('trigger_mese_update'), 100);
+
+              console.log("[tasse] Trigger inviato a mese.html:", payload);
+            } catch (e) {
+              console.warn("Impossibile inviare aggiornamento a mese.html", e);
+            }
+          }
           
           popup.style.display = "none";
           
@@ -672,6 +793,13 @@ document.addEventListener("DOMContentLoaded", async () => {
       alert("❌ Errore: " + (err.message || "Salvataggio fallito"));
     });
   });
+});
+
+// --- Auto-refresh da altri tab ---
+window.addEventListener('storage', function(event) {
+  if (['trigger_taxes_refresh', 'trigger_mese_update', 'trigger_annual_refresh'].includes(event.key)) {
+    location.reload();
+  }
 });
 </script>
 {% endraw %}

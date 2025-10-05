@@ -50,11 +50,22 @@
 <div class="container-fluid my-4 stipendi-wrapper">
   <h2 class="mb-4 text-center" style="color:#336699;">Dettaglio Stipendi Personale</h2>
 
-<div class="d-flex justify-content-end mb-3">
-  <button id="btn-reset-stipendi" class="btn btn-outline-danger btn-sm">
-    Svuota stipendi (utente corrente)
-  </button>
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <a href="/api/stipendi/export/csv/{{ anno }}" class="btn btn-outline-primary btn-sm">
+      <i class="bi bi-file-earmark-spreadsheet"></i> Scarica CSV
+    </a>
+    <a href="/api/stipendi/export/pdf/{{ anno }}" class="btn btn-outline-danger btn-sm">
+      <i class="bi bi-file-earmark-pdf"></i> Scarica PDF
+    </a>
+  </div>
+  <div>
+    <button id="btn-reset-stipendi" class="btn btn-outline-danger btn-sm">
+      Svuota stipendi (utente corrente)
+    </button>
+  </div>
 </div>
+
 
   <div class="block-note mb-3">
     <strong>Come usare la schermata:</strong> inserisci il lordo e il netto per ogni mese.  
@@ -146,6 +157,17 @@
 {% block scripts %}
 
 <script>
+// === DATI INIZIALI DAL SERVER ===
+window.INITIAL_YEAR = {{ anno }};
+window.INITIAL_STIPENDI = {{ stipendi_data | tojson }};
+
+// Funzione ausiliaria per debug (opzionale)
+function log(msg, data) {
+  console.log(`[Stipendi] ${msg}`, data || '');
+}
+</script>
+
+<script>
 /* --- CSRF helper + fetch wrapper --- */
 (function () {
   if (window.csrfFetch) return;
@@ -203,7 +225,7 @@ const MAPPA_ID = {
   'Staff Pulizie': 'staff-pulizie',
   'Altro': 'altro'
 };
-const SYNC_DELAY_MS = 600; // batch entro 600 ms per dipendente
+const SYNC_DELAY_MS = 0; // invio immediato al server
 
 let stipendiData = {};
 let personale = [];
@@ -743,48 +765,69 @@ async function fetchStipendiServer() {
 }
 
 async function init() {
-  loadData();
+  let initialData = null;
+
+  // 1. Prova a caricare da server (API /dettaglio)
+  try {
+    const freshData = await fetchStipendiServer();
+    if (Object.keys(freshData).length > 0) {
+      initialData = freshData;
+      log("✅ Dati caricati da API /dettaglio", initialData);
+    }
+  } catch (err) {
+    console.warn("⚠️ Errore fetch API /dettaglio:", err);
+  }
+
+  // 2. Se server non ha dato nulla → carica da localStorage
+  if (!initialData || Object.keys(initialData).length === 0) {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        initialData = JSON.parse(stored);
+        log("📦 Dati caricati da localStorage", initialData);
+      }
+    } catch (e) {
+      console.warn("⚠️ Errore parsing localStorage:", e);
+    }
+  }
+
+  // 3. Carica anagrafica personale
   personale = await fetchPersonale();
-  const serverData = await fetchStipendiServer(); // /api/stipendi/dettaglio/<anno>
-  const yearKey = String(annoCorrente);
 
-  stipendiData[yearKey] = stipendiData[yearKey] || {};
+  // 4. Prepara struttura base
+  stipendiData[String(annoCorrente)] = {};
 
-  // ✅ usa rec.mesi, non l'oggetto intero
-  Object.entries(serverData).forEach(([empId, rec]) => {
-    const existing = stipendiData[yearKey][empId] || {
-      id: parseInt(empId, 10),
-      nome: rec.nome || "",
-      ruolo: rec.ruolo || "",
-      mesi: {}
-    };
+  if (initialData) {
+    Object.entries(initialData).forEach(([empId, rec]) => {
+      const existing = {
+        id: parseInt(empId, 10),
+        nome: rec.nome || "",
+        ruolo: rec.ruolo || "",
+        mesi: {}
+      };
 
-    // sincronizza anagrafica
-    existing.nome = rec.nome || existing.nome || "";
-    existing.ruolo = rec.ruolo || existing.ruolo || "";
+      Object.entries(rec.mesi || {}).forEach(([slug, values]) => {
+        existing.mesi[slug] = normalizeMonth(values);
+      });
 
-    // carica i mesi corretti
-    const mesiServer = rec.mesi || {};
-    Object.entries(mesiServer).forEach(([slug, values]) => {
-      existing.mesi[slug] = normalizeMonth(values);
+      AVAILABLE_MONTHS.forEach(({ slug }) => {
+        existing.mesi[slug] = normalizeMonth(existing.mesi[slug]);
+      });
+
+      stipendiData[String(annoCorrente)][empId] = existing;
     });
+  }
 
-    // assicura tutti i mesi presenti anche se mancanti sul server
-    AVAILABLE_MONTHS.forEach(({ slug }) => {
-      existing.mesi[slug] = normalizeMonth(existing.mesi[slug]);
-    });
-
-    stipendiData[yearKey][empId] = existing;
-  });
-
+  // 5. Pulizia e render
   pruneRecords(personale);
   render(personale);
   readyForSync = true;
+
+  // 6. Salva su localStorage dopo il render (una sola volta)
   saveData({ trigger: false });
 }
 
 init();
-
 
 
 </script>

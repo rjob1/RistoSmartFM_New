@@ -43,29 +43,157 @@
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script>
-document.addEventListener("DOMContentLoaded", () => {
-  const categorie = ["Canone", "Mutuo", "Finanziamenti", "Stipendi", "Fatture"];
-  const colors = ["#003366", "#005599", "#ffd633", "#ff6666", "#66cc99"];
 
-  for (let i = 0; i < 12; i++) {
-    const ctx = document.getElementById(`chart-${i}`);
-    new Chart(ctx, {
-      type: "doughnut",
-      data: {
-        labels: categorie,
-        datasets: [{
-          data: [0, 0, 0, 0, 0], // valori segnaposto da sostituire via API
-          backgroundColor: colors,
-        }]
-      },
-      options: {
-        responsive: true,
-        plugins: {
-          legend: { position: "bottom" }
-        }
+<script>
+/* === Funzioni di utilità === */
+function formattaNome(slug){
+  return slug
+    .replaceAll('-', ' ')
+    .replace('lavanderia','Lavanderia')
+    .replace('pulizia','Pulizia e igiene')
+    .replace('alimentari','Alimentari (Food Cost)')
+    .replace('bevande','Bevande')
+    .replace('commissioni','Commissioni')
+    .replace('manutenzioni','Manutenzioni')
+    .replace('marketing','Marketing')
+    .replace('licenze','Licenze e assicurazioni')
+    .replace('utilita','Utenze e Servizi')
+    .replace('canone','Canone o Mutuo')
+    .replace(/\b\w/g, l => l.toUpperCase());
+}
+
+function leggiAvvisoVocale(testo){
+  if (!('speechSynthesis' in window)) return;
+  const msg = new SpeechSynthesisUtterance(testo);
+  msg.lang = 'it-IT';
+  msg.rate = 1;
+  msg.pitch = 1;
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(msg);
+}
+
+function mostraPopup(htmlContent, isWarning){
+  const overlay = document.createElement('div');
+  overlay.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.45);display:flex;
+    justify-content:center;align-items:center;z-index:9999;
+  `;
+  const box = document.createElement('div');
+  box.style.cssText = `
+    background:white;border-radius:14px;padding:22px;
+    width:90%;max-width:700px;max-height:85vh;overflow-y:auto;
+    box-shadow:0 0 25px rgba(0,0,0,0.3);
+    border-top:6px solid ${isWarning ? '#cc0000' : '#0066cc'};
+  `;
+  box.innerHTML = `
+    <h2 style="color:${isWarning ? '#cc0000':'#0066cc'};margin-top:0;">
+      ${isWarning ? '⚠️ Attenzione!' : '✅ Tutto sotto controllo'}
+    </h2>
+    ${htmlContent}
+    <div style="text-align:right;margin-top:18px;">
+      <button id="popupCloseBtn" style="
+        background:${isWarning?'#cc0000':'#0066cc'};
+        color:white;border:none;border-radius:6px;
+        padding:8px 18px;font-weight:bold;cursor:pointer;">OK</button>
+    </div>
+  `;
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  const close = ()=>document.body.removeChild(overlay);
+  document.getElementById("popupCloseBtn").onclick = close;
+  setTimeout(close,8000); // chiusura automatica
+}
+
+/* === Logica principale === */
+document.addEventListener("DOMContentLoaded", async () => {
+  const qsAnno = parseInt(new URLSearchParams(location.search).get('anno'), 10);
+  const anno = Number.isInteger(qsAnno) ? qsAnno : {{ anno_corrente }};
+  const response = await fetch(`/api/percentuali_dati/${anno}`);
+  const dati = await response.json();
+
+  const mesi = [
+    "gennaio","febbraio","marzo","aprile","maggio","giugno",
+    "luglio","agosto","settembre","ottobre","novembre","dicembre"
+  ];
+  const oggi = new Date();
+  const meseCorrente = mesi[oggi.getMonth()];
+
+  const soglie = {
+    alimentari:25, bevande:6, utilita:4, manutenzioni:2, marketing:3,
+    licenze:2, commissioni:2, pulizia:1, lavanderia:1.5, 'spese-varie':3
+  };
+
+  // Disegna grafici + click listener
+  for(let i=0;i<12;i++){
+    const mese = mesi[i];
+    const datiMese = dati[mese];
+    if(!datiMese) continue;
+    const categorie = ["Spese Fisse","Tasse","Stipendi Personale",...Object.keys(datiMese.spese_fatture.categorie||{})];
+    const percentuali = [
+      datiMese.spese_fisse.percentuale,
+      datiMese.tasse.percentuale,
+      datiMese.stipendi_personale.percentuale,
+      ...Object.values(datiMese.spese_fatture.categorie||{}).map(c=>c.percentuale)
+    ];
+    const valori = [
+      datiMese.spese_fisse.valore,
+      datiMese.tasse.valore,
+      datiMese.stipendi_personale.valore,
+      ...Object.values(datiMese.spese_fatture.categorie||{}).map(c=>c.valore)
+    ];
+    const colors=["#003366","#005599","#ffd633",...Object.keys(datiMese.spese_fatture.categorie||{}).map((_,x)=>`hsl(${x*60},70%,60%)`)];
+    const ctx=document.getElementById(`chart-${i}`);
+    if(!ctx) continue;
+    new Chart(ctx,{type:"doughnut",data:{labels:categorie,datasets:[{data:percentuali,backgroundColor:colors}]},options:{responsive:true,plugins:{legend:{position:"bottom"},tooltip:{callbacks:{label:function(context){const l=context.label||'';const p=percentuali[context.dataIndex]||0;const e=valori[context.dataIndex]||0;return`${l}: ${p.toFixed(2)}% (€${e.toFixed(2)})`;}}}}}});
+    
+    // click -> popup mese
+    ctx.closest('.card').querySelector('h6').style.cursor='pointer';
+    ctx.closest('.card').querySelector('h6').onclick=()=>mostraControlloMese(mese,datiMese,soglie);
+  }
+
+  // apertura automatica per il mese corrente
+  if (dati[meseCorrente]) {
+    setTimeout(()=>{
+      mostraControlloMese(meseCorrente,dati[meseCorrente],soglie,true);
+    },1000);
+  }
+
+  /* --- Funzione popup con consigli e voce --- */
+  function mostraControlloMese(mese,datiMese,soglie,auto=false){
+    let html=`
+      <p><strong>📅 Mese:</strong> ${mese.charAt(0).toUpperCase()+mese.slice(1)}</p>
+      <p><strong>💰 Incasso:</strong> € ${datiMese.totale_incasso.toLocaleString('it-IT',{minimumFractionDigits:2})}</p>
+      <p><strong>💸 Spese totali:</strong> € ${datiMese.totale_spese.toLocaleString('it-IT',{minimumFractionDigits:2})}</p>
+      <p><strong>📊 Spese/Incasso:</strong> ${(datiMese.totale_spese/(datiMese.totale_incasso||1)*100).toFixed(2)}%</p>
+      <hr>`;
+    let warning=false;
+    const add=(titolo,val,limite,tip)=>{
+      warning=true;
+      html+=`<div style="margin:10px 0;padding:10px;border:2px solid #cc0000;border-radius:8px;">
+        <strong>${titolo}:</strong> ${val.toFixed(2)}% (limite ${limite}%)<br>
+        <em>${tip}</em>
+      </div>`;
+    };
+    // Personale
+    if(datiMese.stipendi_personale.percentuale>33) add("Spese del Personale",datiMese.stipendi_personale.percentuale,33,"Controlla i turni, evita straordinari e rivedi l'organico.");
+    // Canone + Finanziamenti
+    if(datiMese.spese_fisse.percentuale>12) add("Canone e Finanziamenti",datiMese.spese_fisse.percentuale,12,"Rinegozia l'affitto o valuta un rifinanziamento.");
+    // Fatture per soglia singola
+    for(const [cat,obj] of Object.entries(datiMese.spese_fatture.categorie||{})){
+      const lim=soglie[cat.toLowerCase()];
+      if(lim && obj.percentuale>lim){
+        add(formattaNome(cat),obj.percentuale,lim,"Riduci i costi in questa categoria.");
       }
-    });
+    }
+
+    if(warning){
+      mostraPopup(html,true);
+      leggiAvvisoVocale("Attenzione! Nel mese selezionato alcune categorie superano le soglie di spesa.");
+    }else{
+      mostraPopup(html+"<p style='margin-top:15px;'>👏 Tutte le categorie sono entro i limiti. Ottimo lavoro!</p>",false);
+      leggiAvvisoVocale("Ottimo lavoro! Tutte le categorie di spesa sono entro i limiti. Continua così.");
+    }
   }
 });
 </script>

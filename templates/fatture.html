@@ -67,10 +67,12 @@
       </button>
     </div>
     <div class="col-lg-auto col-md-4">
-      <button id="btnDettaglioFornitori" class="btn btn-primary w-100 btn-sm">
+      <a class="btn btn-primary w-100 btn-sm"
+        href="{{ url_for('dettaglio_fornitori') }}?anno={{ (anno|default(anno_corrente))|int }}">
         <i class="bi bi-card-list me-1"></i> Vai al dettaglio spese per fornitore
-      </button>
+      </a>
     </div>
+
   </div>
 
   <!-- Tabella fatture -->
@@ -270,9 +272,10 @@ async function mostraQR(fatturaId) {
     const amount = amountMatch ? parseFloat(amountMatch[1]).toFixed(2) : '-';
     const iban = (data.iban || (data.sepa || '').split('\n')[6]) || '-';
 
+    // --- Funzione mostraQR: parte del popup ---
     document.getElementById('qr-code-container').innerHTML = `
       <img src="${imgSrc}" alt="QR Code SEPA"
-           style="width: 250px; border: 1px solid #ddd; border-radius: 8px;">
+          style="width: 250px; border: 1px solid #ddd; border-radius: 8px;">
       <p id="qrCaption" class="mt-2 fw-bold">${caption}</p>
       <div class="text-start mt-2" style="font-size: 0.85rem; color:#333;">
         <p><strong>Importo:</strong> &euro;${amount}</p>
@@ -321,12 +324,7 @@ window.mostraSuccessoPagamento = mostraSuccessoPagamento;
 document.addEventListener("DOMContentLoaded", async () => {
   const toast = new bootstrap.Toast(document.getElementById("toast"));
   let fornitoriCache = [];
-  const btnDettaglio = document.getElementById("btnDettaglioFornitori");
-  if (btnDettaglio) {
-    btnDettaglio.addEventListener("click", () => {
-      window.location.href = '/dettaglio_fornitori';
-    });
-  }
+  
   const categorie = [
     "Alimentari (Food Cost)","Bevande","UtilitÃ  (Luce, acqua, gas)","Manutenzioni e riparazioni",
     "Marketing e pubblicitÃ ","Licenze e assicurazioni","Commissioni (The Fork)","Lavanderia",
@@ -426,7 +424,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   caricaFornitoriCategorie();
 
-  // Mostra notifiche
+  // --- Funzione mostraNotifiche corretta ---
   function mostraNotifiche(fatture) {
     const notificheDiv = document.getElementById("notifiche");
     const oggi = new Date();
@@ -444,8 +442,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       notificheDiv.innerHTML = `
         <strong>Attenzione!</strong> Hai ${inScadenza.length} fattura(e) in scadenza:
         <ul>${inScadenza.map(f =>
-          `<li><strong>${(f.fornitore || "").trim() || "Senza fornitore"}</strong>: â‚¬${parseFloat(f.importo).toFixed(2)} 
-           (scade il ${new Date(f.data_scadenza).toLocaleDateString()})</li>`
+          `<li><strong>${(f.fornitore || "").trim() || "Senza fornitore"}</strong>: &euro;${parseFloat(f.importo).toFixed(2)} 
+          (scade il ${new Date(f.data_scadenza).toLocaleDateString()})</li>`
         ).join("")}</ul>
       `;
     }

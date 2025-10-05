@@ -187,14 +187,15 @@
   // === Carica dati da API ===
   async function caricaDati() {
     try {
-      const response = await fetch(`/api/dettaglio_fornitori?anno={{ anno }}`);
+      const qsAnno = parseInt(new URLSearchParams(location.search).get('anno'), 10);
+      const fallbackAnno = {{ (anno|default(anno_corrente))|int }};
+      const anno = Number.isInteger(qsAnno) ? qsAnno : fallbackAnno;
+
+      const response = await fetch(`/api/dettaglio_fornitori?anno=${anno}`);
       if (!response.ok) throw new Error("Errore caricamento dati");
       const data = await response.json();
 
-      // Popola filtri
       popolaFiltri(data);
-
-      // Mostra dati
       mostraTabella(data);
     } catch (err) {
       console.error("Errore:", err);

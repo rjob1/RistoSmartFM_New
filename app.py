@@ -11,6 +11,10 @@ from functools import wraps
 import qrcode
 from io import BytesIO
 
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.lib.units import cm
+
 def genera_qr_sepa(iban, nome_ente, importo, causale, bic=None):
     euro = f"EUR{float(importo):.2f}"
     descrizione = (causale or "")[:140]  # massimo 140 caratteri
@@ -76,6 +80,9 @@ MONTH_NUM_TO_SLUG = {i + 1: slug for i, slug in enumerate(MONTH_SLUGS)}
 
 # alias usato dal PUT/QR
 MONTH_SLUG_TO_NUM = MONTH_MAP
+
+def mese_nome(mese_num):
+    return MONTH_NUM_TO_SLUG.get(mese_num, "sconosciuto")
 
 def _normalize_amount(value) -> float:
     if value is None:
@@ -587,6 +594,7 @@ def init_db():
     """Crea le tabelle se non esistono già (versione multi-tenant)"""
     with get_db() as conn:
         cur = conn.cursor()
+        cur.execute("PRAGMA foreign_keys = ON")
 
         # --- INCASSI (multi-tenant) ---
         cur.execute("""
@@ -723,22 +731,7 @@ def init_db():
 
         if 'bic' not in fornitori_cols:
 
-            cur.execute("ALTER TABLE fornitori ADD COLUMN bic TEXT")
-
-
-        # --- PROFILI BANCARI (multi-tenant) ---
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS profili_bancari (
-                user_id INTEGER PRIMARY KEY,
-                nome_titolare TEXT NOT NULL,
-                indirizzo_titolare TEXT NOT NULL,
-                iban_cipher TEXT NOT NULL,
-                bic_cipher TEXT,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                FOREIGN KEY (user_id) REFERENCES utenti (id) ON DELETE CASCADE
-            )
-        """)
+            cur.execute("ALTER TABLE fornitori ADD COLUMN bic TEXT")        
 
         # --- FATTURE (multi-tenant) ---
         cur.execute("""
@@ -833,9 +826,21 @@ def init_db():
         if "data_inserimento" not in tasse_cols:
             cur.execute("ALTER TABLE tasse ADD COLUMN data_inserimento TEXT")
             cur.execute("UPDATE tasse SET data_inserimento = substr(created_at, 1, 10) WHERE data_inserimento IS NULL")
-
-
-        # NON chiamare conn.commit() - il context manager lo fa automaticamente
+    
+    with sqlite3.connect(app.config["DB_PATH"]) as conn:
+        cur = conn.cursor()
+        cur.execute("PRAGMA foreign_keys = ON")  # <— aggiungi QUI
+        cur.execute("""CREATE INDEX IF NOT EXISTS ix_spese_fisse_user_anno_mese_cat
+                    ON spese_fisse(user_id, anno, mese, categoria);""")
+        cur.execute("""CREATE INDEX IF NOT EXISTS ix_incassi_user_anno_mese
+                    ON incassi(user_id, anno, mese);""")
+        cur.execute("""CREATE INDEX IF NOT EXISTS ix_tasse_user_scadenza
+                    ON tasse(user_id, scadenza);""")
+        cur.execute("""CREATE INDEX IF NOT EXISTS ix_stipendi_user_anno_mese
+                    ON stipendi_personale(user_id, anno, mese);""")
+        cur.execute("""CREATE INDEX IF NOT EXISTS ix_fatture_user_data
+                    ON fatture(user_id, data_inserimento);""")
+    # NON chiamare conn.commit() - il context manager lo fa automaticamente     
         
 # Inizializza DB all'avvio
 init_db()
@@ -918,7 +923,7 @@ import json
 def _get_license_expiry_from_db(user_id: int | str):
     try:
         conn = sqlite3.connect(app.config['DB_PATH'])
-        cur = conn.cursor()
+        cur = conn.cursor()        
 
         # Trova tabella licenze: 'licenses' o 'licenze'
         for table in ("licenses", "licenze"):
@@ -1104,9 +1109,62 @@ def mese_html(anno, mese):
     spese = {r["categoria"]: float(r["valore"]) for r in cur.fetchall()}
     tot_spese = sum(spese.values())
 
-    conn.close()
-
+    # --- Calcola ricavo PRIMA di caricare le tasse ---
     ricavo = tot_incassi - tot_spese
+
+    # --- CARICA TASSE PER MESE ---
+    # Mappa gli enti ai campi nel template 'mese.html'
+    ente_to_id = {
+        'agenzia delle entrate': 'agenzia_entrata',
+        'inps': 'inps',
+        'inail': 'inail',
+        'camera di commercio (unioncamere)': 'camera_commercio',
+        'siae': 'siae',
+        'agenzia delle dogane e monopoli (adm)': 'adm',
+        'asl': 'asl',
+        'comune': 'comune'
+    }
+
+    # Inizializza tutti i campi tasse a zero
+    for field_id in ente_to_id.values():
+        spese[field_id] = 0.0
+
+    # Estrai anno e mese numerico dal mese testuale
+    mese_num = mesi.index(mese_norm) + 1  # gennaio=1, ..., settembre=9
+
+    # Carica le tasse dove data_inserimento appartiene all'anno e al mese richiesto
+    cur.execute("""
+        SELECT 
+            e.nome AS ente_nome,
+            t.importo
+        FROM tasse t
+        JOIN ente e ON t.ente_id = e.id AND e.user_id = t.user_id
+        WHERE t.user_id = ?
+        AND CAST(strftime('%Y', t.data_inserimento) AS INTEGER) = ?
+        AND CAST(strftime('%m', t.data_inserimento) AS INTEGER) = ?
+    """, (uid, anno, mese_num))
+
+    # [Opzionale] Log: stampa i nomi degli enti trovati (utile per debug)
+    app.logger.info(f"[DEBUG] Enti trovati per {anno}-{mese_norm}:")
+    for row in cur.fetchall():
+        ente_nome_raw = row['ente_nome']
+        importo = float(row['importo']) if row['importo'] else 0.0
+
+        # Normalizza: trim + lower
+        ente_nome = ente_nome_raw.strip().lower()
+
+        app.logger.info(f"  - '{ente_nome_raw}' → normalizzato → '{ente_nome}'")
+
+        # Cerca il campo corrispondente
+        field_id = ente_to_id.get(ente_nome)
+        if field_id:
+            spese[field_id] += importo
+            app.logger.info(f"    ✓ Matchato con campo: {field_id} → valore aggiunto: {importo}")
+        else:
+            app.logger.warning(f"    ✗ Nessun match per: '{ente_nome}'")
+    # --- FINE CARICAMENTO TASSE ---
+
+    conn.close()
 
     return render_template(
         "mese.html",
@@ -3002,7 +3060,7 @@ def api_stipendi_dettaglio(anno):
             "ruolo": r["ruolo"],
             "mesi": {}
         })
-        rec["mesi"][mese] = {
+        rec["mesi"][mese_nome(mese)] = {
             "lordo": float(r["lordo"] or 0.0),
             "netto": float(r["netto"] or 0.0),
             "contributi": float(r["contributi"] or 0.0),
@@ -3120,9 +3178,128 @@ def api_stipendi_qr(personale_id):
         "categoria": categoria,
         "netto": round(netto, 2),
         "iban": iban
-    })  
+    }) 
 
-# ------------------------------------------------------------------------------------------
+from flask import Response
+import csv
+import io
+
+@app.get("/api/stipendi/export/csv/<int:anno>")
+@require_login
+@require_license
+def export_stipendi_csv(anno):
+    uid = _uid()
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # Intestazione
+    writer.writerow([
+        "Nome dipendente", "Ruolo", "Mese",
+        "Lordo", "Netto", "Contributi", "Totale", "Stato pagamento"
+    ])
+
+    with get_db() as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        rows = cur.execute("""
+            SELECT p.nome, p.ruolo, sp.mese,
+                   sp.lordo, sp.netto, sp.contributi, sp.totale, sp.stato_pagamento
+            FROM stipendi_personale sp
+            JOIN personale p ON p.id = sp.personale_id AND p.user_id = sp.user_id
+            WHERE sp.user_id = ? AND sp.anno = ?
+            ORDER BY p.nome, sp.mese
+        """, (uid, anno)).fetchall()
+
+    for r in rows:
+        writer.writerow([
+            r["nome"],
+            r["ruolo"],
+            MONTH_NUM_TO_SLUG.get(r["mese"], f"Mese {r['mese']}").capitalize(),
+            f"{r['lordo']:.2f}",
+            f"{r['netto']:.2f}",
+            f"{r['contributi']:.2f}",
+            f"{r['totale']:.2f}",
+            "Pagato" if r["stato_pagamento"] == "pagato" else "Non pagato"
+        ])
+
+    output.seek(0)
+    filename = f"stipendi_{anno}.csv"
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+@app.get("/api/stipendi/export/pdf/<int:anno>")
+@require_login
+@require_license
+def export_stipendi_pdf(anno):
+    uid = _uid()
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+
+    title = f"Riepilogo stipendi - Anno {anno}"
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(2 * cm, height - 2 * cm, title)
+
+    # Header colonne
+    headers = [
+        "Nome", "Ruolo", "Mese", "Lordo", "Netto", "Contributi", "Totale", "Stato"
+    ]
+    y = height - 3 * cm
+    line_height = 0.6 * cm
+
+    c.setFont("Helvetica-Bold", 10)
+    for i, col in enumerate(headers):
+        c.drawString((1 + i * 2.5) * cm, y, col)
+
+    # Riga dati
+    y -= line_height
+    c.setFont("Helvetica", 9)
+
+    with get_db() as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        rows = cur.execute("""
+            SELECT p.nome, p.ruolo, sp.mese,
+                   sp.lordo, sp.netto, sp.contributi, sp.totale, sp.stato_pagamento
+            FROM stipendi_personale sp
+            JOIN personale p ON p.id = sp.personale_id AND p.user_id = sp.user_id
+            WHERE sp.user_id = ? AND sp.anno = ?
+            ORDER BY p.nome, sp.mese
+        """, (uid, anno)).fetchall()
+
+    for r in rows:
+        if y < 2 * cm:
+            c.showPage()
+            y = height - 3 * cm
+            c.setFont("Helvetica-Bold", 10)
+            for i, col in enumerate(headers):
+                c.drawString((1 + i * 2.5) * cm, y, col)
+            y -= line_height
+            c.setFont("Helvetica", 9)
+
+        row = [
+            r["nome"],
+            r["ruolo"],
+            MONTH_NUM_TO_SLUG.get(r["mese"], f"Mese {r['mese']}").capitalize(),
+            f"{r['lordo']:.2f}",
+            f"{r['netto']:.2f}",
+            f"{r['contributi']:.2f}",
+            f"{r['totale']:.2f}",
+            "Pagato" if r["stato_pagamento"] == "pagato" else "Non pagato"
+        ]
+        for i, value in enumerate(row):
+            c.drawString((1 + i * 2.5) * cm, y, str(value))
+        y -= line_height
+
+    c.save()
+    buffer.seek(0)
+    filename = f"stipendi_{anno}.pdf"
+    return send_file(buffer, mimetype='application/pdf', as_attachment=True, download_name=filename)
+
+# --------FINE --- API --- STIPENDI --- 
 
 # --- API FORNITORI ---
 @app.route("/api/fornitori", methods=["GET", "POST"])
@@ -3378,9 +3555,9 @@ def api_get_fatture():
 
 @app.route("/dettaglio_fornitori")
 @require_login
-@require_license
 def dettaglio_fornitori():
-    return render_template("dettaglio_fornitori.html")
+    anno = request.args.get("anno", type=int) or _get_selected_year()
+    return render_template("dettaglio_fornitori.html", anno=anno, anno_corrente=anno)
 
 @app.post("/api/fatture")
 @require_login
@@ -4047,6 +4224,79 @@ def conferma_pagamento(tassa_id):
         """, (tassa_id, uid))
     return jsonify(success=True)
 
+# --- APP PER PDF PAGAMENTO-TASSE ---
+
+from fpdf import FPDF
+from io import BytesIO
+from datetime import datetime
+from flask import request, jsonify, send_file
+
+@app.post("/api/pagamenti-tasse/pdf")
+@require_login
+@require_license
+@require_csrf
+def scarica_pdf_pagamenti_tasse():
+    """Genera un PDF delle tasse da pagamento-tasse.html"""
+    uid = _uid()
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids", None)
+    stato = data.get("stato", None)
+
+    query = """
+        SELECT 
+            t.data_inserimento,
+            e.nome AS ente_nome,
+            t.causale,
+            t.scadenza,
+            t.importo,
+            t.stato
+        FROM tasse t
+        JOIN ente e ON t.ente_id = e.id AND e.user_id = t.user_id
+        WHERE t.user_id = ?
+    """
+    params = [uid]
+
+    if isinstance(ids, list) and all(isinstance(i, int) for i in ids):
+        query += " AND t.id IN ({})".format(",".join(["?"] * len(ids)))
+        params.extend(ids)
+
+    if stato in {"pagato", "non_pagato", "standby"}:
+        query += " AND t.stato = ?"
+        params.append(stato)
+
+    query += " ORDER BY date(t.scadenza) DESC, t.id DESC"
+
+    with get_db() as conn:
+        conn.row_factory = sqlite3.Row
+        tasse = conn.execute(query, params).fetchall()
+
+    if not tasse:
+        return jsonify(success=False, error="❌ Non hai tasse in questa categoria"), 404
+
+    # Generazione PDF
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    pdf.cell(0, 10, "Dettaglio Tasse", ln=True, align="C")
+    pdf.ln(5)
+
+    for idx, t in enumerate(tasse, start=1):
+        pdf.set_font("Arial", "B", 11)
+        pdf.multi_cell(0, 8, f"{idx}) Ente: {t['ente_nome']}")
+        pdf.set_font("Arial", "", 10)
+        pdf.multi_cell(0, 6, f"Causale: {t['causale']}")
+        pdf.multi_cell(0, 6, f"Scadenza: {t['scadenza']} - Inserita: {t['data_inserimento']}")
+        pdf.multi_cell(0, 6, f"Importo: EUR {t['importo']:.2f} | Stato: {t['stato'].capitalize()}")
+        pdf.ln(6)
+
+    pdf_bytes = pdf.output(dest="S").encode("latin-1")
+    output = BytesIO(pdf_bytes)
+
+    nome_file = f"pagamenti_tasse_{stato or 'tutte'}_{datetime.today().strftime('%Y%m%d')}.pdf"
+
+    return send_file(output, mimetype="application/pdf", as_attachment=True, download_name=nome_file)
+
+# --- FINE APP PER PDF PAGAMENTO-TASSE
 
 # --- PAGINE --- TASSE ---
 @app.get("/tasse")
@@ -4277,6 +4527,108 @@ def api_spese_annuali(anno):
 
 #-------------------------------------------------------------------------------------------------
 
+# ---- Api Percentuali ---------------------
+
+@app.route("/api/percentuali_dati/<int:anno>")
+@require_login
+@require_license
+def api_percentuali_dati(anno):
+    """
+    Calcola i totali e le percentuali mensili solo per l'anno selezionato.
+    Tutte le query filtrano rigorosamente per user_id e anno.
+    """
+    uid = _uid()
+    db = get_db()
+
+    mesi = [
+        "gennaio","febbraio","marzo","aprile","maggio","giugno",
+        "luglio","agosto","settembre","ottobre","novembre","dicembre"
+    ]
+    risultato = {}
+
+    for num_mese, mese in enumerate(mesi, start=1):
+
+        # 1️⃣ INCASSI — usa colonne anno e mese (no data_inserimento)
+        q_incassi = """
+            SELECT COALESCE(SUM(valore), 0) AS totale
+            FROM incassi
+            WHERE user_id = ? AND anno = ? AND LOWER(COALESCE(mese,'')) = ?
+        """
+        totale_incasso = db.execute(q_incassi, (uid, anno, mese)).fetchone()["totale"] or 0.0
+
+        # 2️⃣ SPESE FISSE — anno + mese + categorie ammesse (null-safe)
+        spese_fisse_ok = ("canone", "finanziamento1", "finanziamento2", "finanziamento-altro")
+        placeholders = ",".join("?" * len(spese_fisse_ok))
+        q_fisse = f"""
+            SELECT COALESCE(SUM(valore), 0) AS totale
+            FROM spese_fisse
+            WHERE user_id = ?
+            AND anno = ?
+            AND LOWER(COALESCE(mese,'')) = ?
+            AND LOWER(COALESCE(categoria,'')) IN ({placeholders})
+        """
+        totale_spese_fisse = db.execute(q_fisse, [uid, anno, mese, *spese_fisse_ok]).fetchone()["totale"] or 0.0
+
+
+        # 3️⃣ TASSE — filtrate per anno e mese da campo scadenza
+        q_tasse = """
+            SELECT COALESCE(SUM(importo), 0) AS totale
+            FROM tasse
+            WHERE user_id = ?
+              AND CAST(strftime('%Y', scadenza) AS INTEGER) = ?
+              AND CAST(strftime('%m', scadenza) AS INTEGER) = ?
+        """
+        totale_tasse = db.execute(q_tasse, (uid, anno, num_mese)).fetchone()["totale"] or 0.0
+
+        # 4️⃣ STIPENDI PERSONALE — anno e mese numerici
+        q_stip = """
+            SELECT COALESCE(SUM(lordo), 0) AS totale
+            FROM stipendi_personale
+            WHERE user_id = ? AND anno = ? AND mese = ?
+        """
+        totale_stipendi = db.execute(q_stip, (uid, anno, num_mese)).fetchone()["totale"] or 0.0
+
+        # 5️⃣ FATTURE — anno e mese da data_inserimento (questa tabella ce l'ha)
+        q_fatture = """
+            SELECT categoria, COALESCE(SUM(importo), 0) AS valore
+            FROM fatture
+            WHERE user_id = ?
+              AND CAST(strftime('%Y', data_inserimento) AS INTEGER) = ?
+              AND CAST(strftime('%m', data_inserimento) AS INTEGER) = ?
+            GROUP BY categoria
+        """
+        spese_fatture = {
+            r["categoria"]: r["valore"]
+            for r in db.execute(q_fatture, (uid, anno, num_mese)).fetchall()
+        }
+
+        # Totali e percentuali
+        totale_spese_fatture = sum(spese_fatture.values())
+        totale_spese = totale_spese_fisse + totale_tasse + totale_stipendi + totale_spese_fatture
+        base = totale_incasso or 1
+
+        risultato[mese] = {
+            "spese_fisse": {"valore": totale_spese_fisse, "percentuale": (totale_spese_fisse / base * 100)},
+            "tasse": {"valore": totale_tasse, "percentuale": (totale_tasse / base * 100)},
+            "stipendi_personale": {"valore": totale_stipendi, "percentuale": (totale_stipendi / base * 100)},
+            "spese_fatture": {"categorie": {}},
+            "totale_spese": totale_spese,
+            "totale_incasso": totale_incasso
+        }
+
+        for cat, val in spese_fatture.items():
+            risultato[mese]["spese_fatture"]["categorie"][cat] = {
+                "valore": val,
+                "percentuale": (val / base * 100)
+            }
+
+    # 🔒 mostra grafici solo se esiste incasso nel mese (evita anni “vuoti” popolati dai soli stipendi)
+    risultato = {m: v for m, v in risultato.items() if v["totale_incasso"] > 0}
+
+    return jsonify(risultato)
+    
+# -----Fine Percentuali -----------------------
+
 @app.post("/api/newsletter/send")
 @require_login
 @require_license
@@ -4432,8 +4784,40 @@ def stipendi():
         _set_selected_year(anno)
     else:
         anno = _get_selected_year()
-    return render_template("stipendi.html", anno=anno)
 
+    user_id = _uid()
+
+    db = get_db()
+    rows = db.execute("""
+        SELECT personale_id, mese, lordo, netto, contributi, totale, stato_pagamento
+        FROM stipendi_personale
+        WHERE user_id = ? AND anno = ?
+    """, (user_id, anno)).fetchall()
+
+    # Converti i dati in formato serializzabile per Jinja2 + JS
+    stipendi_data = {}
+    for row in rows:
+        pid = str(row["personale_id"])
+        mese_num = row["mese"]
+        mese_slug = mese_nome(mese_num)  # es: 1 → "gennaio"
+
+        if pid not in stipendi_data:
+            stipendi_data[pid] = {
+                "id": row["personale_id"],
+                "nome": "",  # sarà riempito via JS → fetchPersonale()
+                "ruolo": "", # idem
+                "mesi": {}
+            }
+
+        stipendi_data[pid]["mesi"][mese_slug] = {
+            "lordo": row["lordo"],
+            "netto": row["netto"],
+            "contributi": row["contributi"],
+            "totale": row["totale"],
+            "pagato": row["stato_pagamento"] == "pagato"
+        }
+
+    return render_template("stipendi.html", anno=anno, stipendi_data=stipendi_data)
 
 @app.route("/fornitori")
 @require_login
@@ -4483,8 +4867,7 @@ def situazione_annuale(anno):
     if not anni:
         anni = {datetime.now().year}
 
-    if anno not in anni:
-        anno = max(anni)
+    anni.add(anno)
 
     # Assicurati che l'elenco arrivi almeno fino al 2030
     current_year = datetime.now().year
@@ -4511,39 +4894,54 @@ def api_annuale(anno):
     dati = []
     tot_inc = tot_spe = 0.0
 
+    # Incassi, spese fisse, stipendi, fatture e tasse per ogni mese
     for m in mesi:
-        # Incassi
+        # 1. Incassi
         inc = db.execute("""
-            SELECT COALESCE(SUM(valore),0)
+            SELECT COALESCE(SUM(valore), 0)
             FROM incassi
-            WHERE user_id=? AND anno=? AND mese=?
-        """, (uid, anno, m)).fetchone()[0] or 0.0
+            WHERE user_id=? AND anno=? AND LOWER(mese)=?
+        """, (uid, anno, m.lower())).fetchone()[0] or 0.0
 
-        # Spese fisse
+        # 2. Spese Fisse
         spese_fisse = db.execute("""
-            SELECT COALESCE(SUM(valore),0)
+            SELECT COALESCE(SUM(valore), 0)
             FROM spese_fisse
-            WHERE user_id=? AND anno=? AND mese=?
-        """, (uid, anno, m)).fetchone()[0] or 0.0
+            WHERE user_id=? AND anno=? AND LOWER(mese)=?
+        """, (uid, anno, m.lower())).fetchone()[0] or 0.0
 
-        # Stipendi
+                # 3. Stipendi (lordo)
         try:
+            mese_num = mesi.index(m) + 1  # gennaio=1, ..., ottobre=10
             stipendi = db.execute("""
-                SELECT COALESCE(SUM(lordo),0)
-                FROM stipendi_mensili
-                WHERE user_id=? AND strftime('%Y', mese)=? AND lower(strftime('%m', mese))=?
-            """, (uid, str(anno), f"{mesi.index(m)+1:02d}")).fetchone()[0] or 0.0
-        except Exception:
+                SELECT COALESCE(SUM(lordo), 0)
+                FROM stipendi_personale
+                WHERE user_id=? AND anno=? AND mese=?
+            """, (uid, anno, mese_num)).fetchone()[0] or 0.0
+        except Exception as e:
+            app.logger.warning(f"Errore lettura stipendi per {m} {anno}: {e}")
             stipendi = 0.0
 
-        # Fatture
+        # 4. Spese Fatture
         fatture = db.execute("""
-            SELECT COALESCE(SUM(importo),0)
+            SELECT COALESCE(SUM(importo), 0)
             FROM fatture
-            WHERE user_id=? AND strftime('%Y', data_inserimento)=? AND strftime('%m', data_inserimento)=?
-        """, (uid, str(anno), f"{mesi.index(m)+1:02d}")).fetchone()[0] or 0.0
+            WHERE user_id=? AND CAST(strftime('%Y', data_inserimento) AS INTEGER)=? 
+            AND LOWER(strftime('%m', data_inserimento))=?
+        """, (uid, anno, f"{mesi.index(m)+1:02d}")).fetchone()[0] or 0.0
 
-        spese = spese_fisse + stipendi + fatture
+        # 5. Tasse (da tasse + ente)
+        tasse = db.execute("""
+            SELECT COALESCE(SUM(t.importo), 0)
+            FROM tasse t
+            JOIN ente e ON t.ente_id = e.id AND e.user_id = t.user_id
+            WHERE t.user_id = ?
+            AND CAST(strftime('%Y', t.data_inserimento) AS INTEGER) = ?
+            AND CAST(strftime('%m', t.data_inserimento) AS INTEGER) = ?
+        """, (uid, anno, mesi.index(m) + 1)).fetchone()[0] or 0.0
+
+        # Totale spese
+        spese = round(spese_fisse + stipendi + fatture + tasse, 2)
         ricavo = inc - spese
         perc = (ricavo / inc * 100.0) if inc else 0.0
 
@@ -4570,7 +4968,7 @@ def api_annuale(anno):
             "incidenza": round(tot_incidenza, 2)
         }
     })
-
+    
 # Redirect da /report verso /situazione-annuale
 @app.route("/report")
 @require_login
@@ -4640,95 +5038,6 @@ def _load_bank_profile(user_id: int):
             )
     profilo.bic = (bic_plain or "").strip().upper()
     return profilo, error
-
-@app.route("/profilo-bancario")
-@require_login
-@require_license
-def profilo_bancario():
-    user_id = _uid()
-    dati, decrypt_error = _load_bank_profile(user_id)
-    success_msg = "Dati bancari salvati correttamente." if request.args.get("salvato") else None
-    error_msg = decrypt_error
-    return render_template(
-        "profilo_bancario.html",
-        dati=dati,
-        success_msg=success_msg,
-        error_msg=error_msg,
-    )
-
-@app.post("/profilo/bancario")
-@require_login
-@require_license
-@require_csrf
-def salva_profilo_bancario():
-    user_id = _uid()
-    nome = (request.form.get("nome_titolare") or "").strip()
-    indirizzo = (request.form.get("indirizzo") or "").strip()
-    iban_input = (request.form.get("iban") or "").strip()
-    bic_input = (request.form.get("bic") or "").strip()
-
-    dati = SimpleNamespace(
-        nome_titolare=nome,
-        indirizzo_titolare=indirizzo,
-        iban=iban_input,
-        bic=bic_input,
-    )
-
-    if not nome or not indirizzo or not iban_input:
-        return render_template(
-            "profilo_bancario.html",
-            dati=dati,
-            error_msg="Compila tutti i campi obbligatori.",
-        ), 400
-
-    import re
-
-    iban_clean = re.sub(r"\s+", "", iban_input).upper()
-    if len(iban_clean) < 15:
-        return render_template(
-            "profilo_bancario.html",
-            dati=dati,
-            error_msg="IBAN non valido.",
-        ), 400
-
-    bic_clean = re.sub(r"\s+", "", bic_input).upper()
-    if bic_clean and not (6 <= len(bic_clean) <= 11):
-        return render_template(
-            "profilo_bancario.html",
-            dati=dati,
-            error_msg="BIC/SWIFT non valido.",
-        ), 400
-
-    try:
-        iban_cipher = encrypt_data(iban_clean)
-        bic_cipher = encrypt_data(bic_clean) if bic_clean else None
-    except Exception as exc:
-        app.logger.exception(
-            "Errore nella cifratura dei dati bancari per l'utente %s", user_id, exc_info=exc
-        )
-        return render_template(
-            "profilo_bancario.html",
-            dati=dati,
-            error_msg="Impossibile salvare i dati bancari in questo momento.",
-        ), 500
-
-    now = datetime.utcnow().isoformat(timespec="seconds")
-    with get_db() as conn:
-        conn.execute(
-            """
-            INSERT INTO profili_bancari (user_id, nome_titolare, indirizzo_titolare, iban_cipher, bic_cipher, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET
-                nome_titolare=excluded.nome_titolare,
-                indirizzo_titolare=excluded.indirizzo_titolare,
-                iban_cipher=excluded.iban_cipher,
-                bic_cipher=excluded.bic_cipher,
-                updated_at=excluded.updated_at
-            """,
-            (user_id, nome, indirizzo, iban_cipher, bic_cipher, now, now),
-        )
-    return redirect(url_for("profilo_bancario", salvato=1))
-
 
 @app.get("/_debug/routes")
 @require_admin
@@ -4960,6 +5269,114 @@ try:
 except Exception as e:
     app.logger.warning(f"ux_stipendi_personale non creato: {e}")
 
+# --- INIZIO --- APP --- PDF --- PER --- TASSE.HTML --- (NO --- PER PAGAMENTO-TASSE.HTML) ---
+
+from flask import send_file
+import os
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+from datetime import datetime
+
+@app.get("/api/tasse/pdf")
+@require_login
+@require_license
+def download_tasse_pdf():
+    uid = _uid()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"enti_tasse_{timestamp}.pdf"
+    filepath = os.path.join(app.config.get("USER_FILES_DIR", "user_files"), str(uid), filename)
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+
+    # Carica enti dal DB — SENZA 'sito'
+    with get_db() as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT nome, telefono, email, iban, bic 
+            FROM ente 
+            WHERE user_id = ? 
+            ORDER BY nome ASC
+        """, (uid,))
+        enti = [dict(row) for row in cur.fetchall()]
+
+    if not enti:
+        return {"error": "Nessun ente da esportare"}, 404
+
+    # Genera PDF
+    doc = SimpleDocTemplate(filepath, pagesize=A4)
+    styles = getSampleStyleSheet()
+    elements = []
+
+    # Titolo
+    title = Paragraph("📋 Elenco Enti Fiscali & Contributivi", styles['Title'])
+    subtitle = Paragraph(f"Esportato il {datetime.today().date().strftime('%d/%m/%Y')}", styles['Normal'])
+    elements.append(title)
+    elements.append(Spacer(1, 12))
+    elements.append(subtitle)
+    elements.append(Spacer(1, 24))
+
+    # Dati tabella — SENZA 'Sito'
+    data = [["Nome", "Telefono", "Email", "IBAN", "BIC"]]
+    for e in enti:
+        data.append([
+            e["nome"],
+            e["telefono"] or "",
+            e["email"] or "",
+            e["iban"] or "",
+            e["bic"] or ""
+        ])
+
+    # Larghezze colonne ottimizzate (totale ~7.5")
+    col_widths = [
+        1.3 * inch,   # Nome
+        1.2 * inch,   # Telefono
+        1.8 * inch,   # Email
+        1.8 * inch,   # IBAN
+        1.4 * inch    # BIC
+    ]
+
+    # ✅ Crea la tabella PRIMA di impostare lo stile
+    table = Table(data, colWidths=col_widths, repeatRows=1)
+
+    # ✅ Ora applica lo stile
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#003366")),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
+        ('FONTSIZE', (0, 1), (-1, -1), 7),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('WORDWRAP', (0, 0), (-1, -1), True),
+        ('TEXT_OVERFLOW', (0, 0), (-1, -1), 'ELLIPSIS'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 2),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 2)
+    ]))
+
+    # ✅ Aggiungi la tabella agli elementi del documento
+    elements.append(table)
+    elements.append(Spacer(1, 12))
+    footer = Paragraph("Documento generato da RistoSmartFM", styles['Italic'])
+    elements.append(footer)
+
+    try:
+        doc.build(elements)
+        return send_file(
+            filepath,
+            as_attachment=True,
+            download_name=f"enti_tasse_{datetime.today().year}.pdf"
+        )
+    except Exception as e:
+        app.logger.error(f"Errore generazione PDF tasse: {e}")
+        return {"error": "Impossibile generare il PDF"}, 500
+
+# --- FINE --- APP --- PDF --- PER --- TASSE.HTML --- (NO --- PER PAGAMENTO-TASSE.HTML) ---
+
         
 # === MAIN ===
 if __name__ == "__main__":
@@ -4967,4 +5384,9 @@ if __name__ == "__main__":
     ensure_triggers()
     ensure_data_consistency()   # <-- aggiungi qui
     app.config["PROPAGATE_EXCEPTIONS"] = False
-    app.run(debug=False)
+
+    # ✅ Avvia su tutta la rete locale (quindi visibile anche dal laptop)
+    app.run(host="0.0.0.0", port=5000, debug=True)
+       
+
+

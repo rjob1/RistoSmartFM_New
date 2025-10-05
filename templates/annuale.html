@@ -213,6 +213,7 @@ document.addEventListener("DOMContentLoaded", () => {
     notifiche.textContent = message;
     notifiche.classList.remove("d-none", "alert-info", "alert-danger", "alert-success", "alert-warning");
     notifiche.classList.add(`alert-${variant}`);
+    setTimeout(() => notifiche.classList.add("d-none"), 3000);
   }
 
   function clearNotification() {
@@ -222,6 +223,7 @@ document.addEventListener("DOMContentLoaded", () => {
     notifiche.classList.remove("alert-info", "alert-danger", "alert-success", "alert-warning");
   }
 
+  // Funzione esposta globalmente per essere chiamata dal listener storage
   async function caricaDati(anno) {
     clearNotification();
     try {
@@ -275,12 +277,33 @@ document.addEventListener("DOMContentLoaded", () => {
       updateCell("tot-incidenza", formatPercent(totali.incidenza));
 
       chart.update();
+      showNotification("Dati aggiornati automaticamente", "success");
     } catch (error) {
       console.error("Errore caricamento dati annuali:", error);
       resetTable();
       showNotification("Impossibile caricare la situazione annuale. Riprova più tardi.", "danger");
     }
   }
+
+  // Esponi caricaDati globalmente per l'evento storage
+  window.caricaDati = caricaDati;
+
+  // === 🔔 ASCOLTO CAMBIAMENTI DA ALTRE PAGINE ===
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'trigger_annual_refresh') {
+      const currentYear = annoSelect.value;
+      const changedYear = e.newValue;
+
+      if (!changedYear) return;
+
+      console.log('[annuale] Cambiamento rilevato per l\'anno:', changedYear);
+
+      // Aggiorna solo se l'anno modificato è quello attualmente visualizzato
+      if (changedYear === currentYear) {
+        caricaDati(currentYear);
+      }
+    }
+  });
 
   monthButtons.forEach(btn => {
     btn.addEventListener("click", () => {
@@ -300,11 +323,5 @@ document.addEventListener("DOMContentLoaded", () => {
 
   caricaDati(startYear);
 });
-
 </script>
 {% endblock %}
-
-
-
-
-
